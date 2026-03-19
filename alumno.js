@@ -3,10 +3,11 @@
 // ════════════════════════════════════════════════════════════════
 // Firebase inicializado por assets/js/firebase-init.js
 const URL_GAS="https://script.google.com/macros/s/AKfycbwZg7nmuTA27A3rT6Pn6uDyfB4eyzbrFP5js09VNC1L-iMqG__DIvlFS59oH90HHu1Q/exec";
-const INSCRIPCION_MONTO=800;
+let INSCRIPCION_MONTO=800;
 // Paquetes: clases → {n: precio normal, p: precio pronto pago}
-const PAQUETES_FITNESS  ={1:{n:240,p:240},2:{n:480,p:480},3:{n:720,p:720},4:{n:960,p:960},5:{n:1200,p:1200}};
-const PAQUETES_GIMNASIA ={1:{n:850,p:765},2:{n:1600,p:1440},3:{n:2200,p:1980},4:{n:2750,p:2475},5:{n:3200,p:2880}};
+// Valores de fallback; se sobreescriben al cargar desde Firebase en cargarPreciosAlumno()
+let PAQUETES_FITNESS  ={1:{n:240,p:240},2:{n:480,p:480},3:{n:720,p:720},4:{n:960,p:960},5:{n:1200,p:1200}};
+let PAQUETES_GIMNASIA ={1:{n:850,p:765},2:{n:1600,p:1440},3:{n:2200,p:1980},4:{n:2750,p:2475},5:{n:3200,p:2880}};
 const PKG_OPTS=[1,2,3,4,5];
 const $=id=>document.getElementById(id);
 
@@ -29,6 +30,24 @@ let _modifEjSlot=null; // slot de referencia activo en el modal de modificación
 function toast(msg,ms=3000){const t=$('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),ms);}
 
 // ════════════════════════════════════════════════════════════════
+// CARGAR PRECIOS DESDE FIREBASE
+// ════════════════════════════════════════════════════════════════
+async function cargarPreciosAlumno(){
+    try{
+        const df=await db.collection('config').doc('costos_fitness').get();
+        if(df.exists){const d=df.data();PAQUETES_FITNESS={1:{n:d.d1,p:d.p1},2:{n:d.d2,p:d.p2},3:{n:d.d3,p:d.p3},4:{n:d.d4,p:d.p4},5:{n:d.d5,p:d.p5}};}
+    }catch(e){console.warn('No se pudieron cargar costos fitness:',e);}
+    try{
+        const dg=await db.collection('config').doc('costos_gimnasia').get();
+        if(dg.exists){const d=dg.data();PAQUETES_GIMNASIA={1:{n:d.d1,p:d.p1},2:{n:d.d2,p:d.p2},3:{n:d.d3,p:d.p3},4:{n:d.d4,p:d.p4},5:{n:d.d5,p:d.p5}};}
+    }catch(e){console.warn('No se pudieron cargar costos gimnasia:',e);}
+    try{
+        const di=await db.collection('config').doc('inscripcion').get();
+        if(di.exists&&di.data().monto)INSCRIPCION_MONTO=Number(di.data().monto)||800;
+    }catch(e){console.warn('No se pudo cargar config inscripcion:',e);}
+}
+
+// ════════════════════════════════════════════════════════════════
 // LOGIN HELPERS
 // ════════════════════════════════════════════════════════════════
 function switchLTab(t){
@@ -44,9 +63,22 @@ function hideLErr(panel){$('lerr-'+panel).classList.remove('on');}
 // ════════════════════════════════════════════════════════════════
 // SESIÓN
 // ════════════════════════════════════════════════════════════════
-window.addEventListener('DOMContentLoaded',()=>{
+let _curpAttempts=0;
+const MAX_CURP_ATTEMPTS=5;
+
+window.addEventListener('DOMContentLoaded',async()=>{
+    await cargarPreciosAlumno();
     const s=localStorage.getItem('ib_session');
-    if(s)try{USER=JSON.parse(s);entrarPortal();}catch{localStorage.removeItem('ib_session');}
+    if(s){
+        try{
+            const {id}=JSON.parse(s);
+            if(id){
+                const snap=await db.collection('alumnos').doc(id).get();
+                if(snap.exists){USER={id,...snap.data()};delete USER.password;delete USER.pin;delete USER.curp;entrarPortal();}
+                else{localStorage.removeItem('ib_session');}
+            }
+        }catch{localStorage.removeItem('ib_session');}
+    }
 });
 
 // ════════════════════════════════════════════════════════════════
@@ -63,10 +95,12 @@ async function doLogin(){
         const snap=await db.collection('alumnos').doc(id).get();
         if(!snap.exists){showLErr('login','Matrícula "'+id+'" no encontrada');return;}
         const data=snap.data();
-        const ok=String(data.password||'')=== pass||String(data.pin||'')=== pass||Number(data.pin)===Number(pass);
+        const passStr=String(pass||'');
+        const ok=(String(data.password||'')===passStr)||(String(data.pin||'')===passStr);
         if(!ok){showLErr('login','Contraseña incorrecta');return;}
         USER={id,...data};
-        localStorage.setItem('ib_session',JSON.stringify(USER));
+        delete USER.password;delete USER.pin;delete USER.curp;
+        localStorage.setItem('ib_session',JSON.stringify({id}));
         entrarPortal();
     }catch(e){showLErr('login','Error: '+e.message);}
     finally{btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-arrow-right-to-bracket" style="margin-right:6px"></i>Ingresar';}
@@ -77,6 +111,7 @@ async function doLogin(){
 // ════════════════════════════════════════════════════════════════
 let _rAlumno=null;
 async function verificarCURP(){
+    if(_curpAttempts>=MAX_CURP_ATTEMPTS){showLErr('reset','Demasiados intentos. Recarga la página.');return;}
     const id=$( 'ri-id').value.trim().toUpperCase();
     const curp=$( 'ri-curp').value.trim().toUpperCase();
     if(!id||curp.length!==18){showLErr('reset','Ingresa ID y CURP de 18 caracteres');return;}
@@ -84,9 +119,9 @@ async function verificarCURP(){
     btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin" style="margin-right:6px"></i>Verificando...';
     try{
         const snap=await db.collection('alumnos').doc(id).get();
-        if(!snap.exists){showLErr('reset','Matrícula no encontrada');return;}
+        if(!snap.exists){_curpAttempts++;showLErr('reset','Matrícula no encontrada');return;}
         const data=snap.data();
-        if(String(data.curp||'?').toUpperCase()!==curp){showLErr('reset','CURP no coincide con el registro');return;}
+        if(String(data.curp||'?').toUpperCase()!==curp){_curpAttempts++;showLErr('reset','CURP no coincide con el registro');return;}
         _rAlumno={id,...data};
         $( 'lerr-reset').classList.remove('on');
         $( 'ri-nueva-wrap').style.display='block';
@@ -99,7 +134,7 @@ async function guardarNuevaPass(){
     if(p1.length<6){showLErr('reset','Mínimo 6 caracteres');return;}
     if(p1!==p2){showLErr('reset','Las contraseñas no coinciden');return;}
     if(!_rAlumno)return;
-    await db.collection('alumnos').doc(_rAlumno.id).update({password:p1,primerAcceso:false});
+    await db.collection('alumnos').doc(_rAlumno.id).update({password:p1,pin:p1,primerAcceso:false});
     $( 'lsuccess-msg').textContent='¡Contraseña actualizada! Ya puedes iniciar sesión.';
     $( 'lsuccess-reset').classList.add('on');
     $( 'ri-nueva-wrap').style.display='none';
@@ -120,6 +155,7 @@ function logout(){localStorage.removeItem('ib_session');location.reload();}
 // INICIAR PORTAL
 // ════════════════════════════════════════════════════════════════
 function iniciarPortal(){
+    cargarPreciosAlumno();
     // Drawer
     $('drawerNombre').textContent=USER.nombre?.split(' ')[0]||'Alumno';
     $('drawerID').textContent='ID: '+USER.id;
@@ -268,7 +304,7 @@ function actualizarInscripcion(){
         sbE.textContent=inscrita?'Inscripción Activa':'Inscripción Pendiente';
         sbE.style.color=inscrita?'#6ee7b7':'#fbbf24';
     }
-    if(sbD)sbD.textContent=inscrita?'':(conCargo?'Costo: $800 MXN':'¡Inscripción gratuita!');
+    if(sbD)sbD.textContent=inscrita?'':(conCargo?'Costo: $'+INSCRIPCION_MONTO+' MXN':'¡Inscripción gratuita!');
     const sc=$('statCarrito');if(sc)sc.textContent=CART.length;
 }
 
@@ -1603,9 +1639,9 @@ async function guardarPrimerPass(){
     if(p1!==p2){errMsg.textContent='Las contraseñas no coinciden';errEl.classList.add('on');return;}
     errEl.classList.remove('on');
     try{
-        await db.collection('alumnos').doc(USER.id).update({password:p1,primerAcceso:false});
-        USER.password=p1;USER.primerAcceso=false;
-        localStorage.setItem('ib_session',JSON.stringify(USER));
+        await db.collection('alumnos').doc(USER.id).update({password:p1,pin:p1,primerAcceso:false});
+        USER.primerAcceso=false;
+        localStorage.setItem('ib_session',JSON.stringify({id:USER.id}));
         $( 'modalPass').classList.remove('on');
         toast('✅ ¡Contraseña creada exitosamente!',4000);
     }catch(e){errMsg.textContent='Error: '+e.message;errEl.classList.add('on');}

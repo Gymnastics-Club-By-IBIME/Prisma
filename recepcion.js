@@ -25,6 +25,15 @@ const PALABRAS_MEMBRESIA=["MENSUALIDAD","CLASE","INSCRIPCION","PLAN","MEMBRESIA"
 const MEMBRESIA_DIAS=30;
 const $=id=>document.getElementById(id);
 
+let INSCRIPCION_PRECIO=800; // fallback; se carga desde config/inscripcion al inicio
+
+async function cargarConfigRecepcion(){
+    try{
+        const snap=await db.collection('config').doc('inscripcion').get();
+        if(snap.exists&&snap.data().monto)INSCRIPCION_PRECIO=Number(snap.data().monto)||800;
+    }catch(e){console.warn('No se pudo cargar config inscripcion:',e);}
+}
+
 // Firebase inicializado por assets/js/firebase-init.js
 const db=firebase.firestore(),rtdb=firebase.database();
 
@@ -177,7 +186,7 @@ async function registrarAlumno(){
         const pin='gymnastics2026';
         const hoy=new Date();const venc=new Date(hoy);venc.setDate(venc.getDate()+MEMBRESIA_DIAS);
         const vencStr=venc.toISOString().split('T')[0];
-        const montoInscripcion = cuponAplicado ? '0' : '800';
+        const montoInscripcion = cuponAplicado ? '0' : String(INSCRIPCION_PRECIO);
         await db.collection('alumnos').doc(nuevoID).set({nombre,curp,nivel,pago:montoInscripcion,pin,condicion:cond,matricula:mat,correo,celular,fechaRegistro:hoy.toLocaleDateString('es-MX'),vencimiento:vencStr,estatus:'INACTIVO',inscripcionPagada:cuponAplicado,inscripcionExenta:cuponAplicado,cuponUsado:cuponAplicado?'APERTURA2026':null,primerAcceso:true,password:pin});
         fetch(URL_GAS,{method:'POST',mode:'no-cors',body:JSON.stringify({accion:'NUEVO_USUARIO',id:nuevoID,nombre,curp,pin,nivel,monto:montoInscripcion,fecha:hoy.toLocaleDateString('es-MX'),condicion:cond,matricula:mat,vencimiento:vencStr})}).catch(()=>{});
         mostrarCredencialReg(nuevoID,nombre,nivel,pin,vencStr);
@@ -397,7 +406,7 @@ function toggleCarritoInsc() {
 
 function actualizarCajaCarritoTotal() {
   let total = 0;
-  if (_cajaInscCheck) total += 800;
+  if (_cajaInscCheck) total += INSCRIPCION_PRECIO;
   Object.values(_cajaCartItems).forEach(c => total += (c.precio || 0));
   const totalEl = $('cajaCartTotalVal');
   if (totalEl) totalEl.textContent = '$' + total.toLocaleString('es-MX', {minimumFractionDigits:2,maximumFractionDigits:2});
@@ -411,7 +420,7 @@ function aplicarCarritoACaja() {
   if (_cajaInscCheck) items.push('INSCRIPCION');
   clases.forEach(c => items.push(c.nombre));
   if (!items.length) { toast('⚠️ Selecciona al menos un item'); return; }
-  let total = _cajaInscCheck ? 800 : 0;
+  let total = _cajaInscCheck ? INSCRIPCION_PRECIO : 0;
   clases.forEach(c => total += (c.precio || 0));
   $('cajaMonto').value = total;
   $('cajaDetalle').value = items.join(', ');
@@ -964,6 +973,7 @@ function mostrarDetalleDia(dia) {
 }
 // Inicializar filtro de mes al cargar
 window.addEventListener('DOMContentLoaded',()=>{
+    cargarConfigRecepcion();
     const hoy=new Date();
     const mesActual=hoy.getFullYear()+'-'+String(hoy.getMonth()+1).padStart(2,'0');
     const fi=$('filtroMesIngr');if(fi)fi.value=mesActual;

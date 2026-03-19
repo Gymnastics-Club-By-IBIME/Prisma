@@ -24,6 +24,11 @@
  *   alertaMostrada (bool), fechaConfirmacion,
  *   frecuenciaSem (number|null), timestamp (number ms),
  *   dia, hora (HH:MM), horaFin (HH:MM), profesor,
+ *
+ * NOTA DE CONSISTENCIA: en `catalogo/{id}` los horarios se guardan como `inicio` (HH:MM) y `fin` (HH:MM).
+ * En `reservas/{id}` se usan `hora` y `horaFin` (equivalentes a inicio/fin del catálogo).
+ * En futuras versiones unificar a `inicio`/`fin` en ambas colecciones.
+ *
  *   pasesTotal (number), pasesRestantes (number),
  *   --- Campos Etapa 2 (plan semanal) ---
  *   planSemanal (bool),           // true para reservas creadas con el nuevo flujo
