@@ -10,54 +10,114 @@ no una credencial secreta. Firebase lo diseña así: la seguridad real se implem
 
 ---
 
-## ✅ Qué debes configurar en Firebase Console
+## 🔐 Sistema de Autenticación por Roles
 
-### 1. Firestore Security Rules
+### Estrategia por tipo de usuario
 
-Ve a: Firebase Console → Firestore → Rules
+| Portal | Método Auth | Email interno | Creado por |
+|---|---|---|---|
+| Alumno escuela | ID + PIN / contraseña (sin Firebase Auth) | No aplica | Recepción |
+| Alumno público | Google / Apple (opcional) | El suyo | Él mismo |
+| Profesor | Email interno + contraseña | `profe.{id}@prisma.com` | Admin |
+| Recepción | Email interno + contraseña | `recepcion@prisma.com` | Admin |
+| Admin | Email interno + contraseña | `admin@prisma.com` | Admin |
+| Caja | Email interno + contraseña | `caja@prisma.com` | Admin |
 
-Reemplaza las reglas actuales con:
+> ⚠️ El dominio `@prisma.com` se usa **solo internamente** en Firebase Auth. Nunca se muestra
+> en la UI como el correo real del usuario.
+
+### Colección `usuarios_staff`
+
+Cada usuario de staff tiene un documento en Firestore `usuarios_staff/{uid}`:
+
+```
+correo: string         // email interno en Firebase Auth
+rol: string            // "admin" | "recepcion" | "caja"
+nombre: string         // nombre visible en UI
+createdAt: timestamp
+```
+
+---
+
+## ✅ Configurar usuarios de staff en Firebase Auth Console
+
+1. Ve a **Firebase Console → Authentication → Users**
+2. Haz clic en **"Añadir usuario"**
+3. Crea los siguientes usuarios con sus correos internos:
+
+   | Usuario | Email | Notar |
+   |---|---|---|
+   | Administrador | `admin@prisma.com` | Rol: `admin` |
+   | Recepción | `recepcion@prisma.com` | Rol: `recepcion` |
+   | Caja | `caja@prisma.com` | Rol: `caja` |
+   | Profesor Juan | `profe.juan-garcia@prisma.com` | El ID debe coincidir con el doc en `profesores/{id}` |
+
+4. Copia el **UID** de cada usuario creado
+5. En Firestore, crea el documento `usuarios_staff/{uid}` con los campos indicados arriba
+
+### Crear email de profesor
+
+El email se construye como `profe.{profesorId}@prisma.com` donde `profesorId` es el ID del
+documento en la colección `profesores`. Por ejemplo, si el ID del profesor en Firestore es
+`juan-garcia`, su email es `profe.juan-garcia@prisma.com`.
+
+---
+
+## ✅ Firestore Security Rules
+
+El archivo `firestore.rules` en la raíz del repositorio contiene las reglas de seguridad
+completas. Despliégalas en Firebase Console → Firestore → Rules:
 
 ```
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Alumnos: solo lectura del propio documento, escritura restringida
+    function isAuthenticated() { return request.auth != null; }
+
+    function isStaff() {
+      return isAuthenticated() &&
+        exists(/databases/$(database)/documents/usuarios_staff/$(request.auth.uid));
+    }
+
+    function getStaffRole() {
+      return get(/databases/$(database)/documents/usuarios_staff/$(request.auth.uid)).data.rol;
+    }
+
+    function isAdmin() { return isStaff() && getStaffRole() == 'admin'; }
+
+    function isRecepcionOrAdmin() {
+      return isStaff() && (getStaffRole() == 'recepcion' || getStaffRole() == 'admin');
+    }
+
     match /alumnos/{alumnoId} {
-      allow read: if true; // El portal alumno lee por ID directo
-      allow write: if true; // Temporalmente permisivo — ver nota abajo
+      allow read: if isAuthenticated() && (request.auth.uid == resource.data.authUID || isStaff());
+      allow write: if isRecepcionOrAdmin();
+      allow update: if isAuthenticated() && request.auth.uid == resource.data.authUID;
     }
 
-    // Catálogo de clases: lectura pública, escritura solo desde admin
-    match /catalogo/{docId} {
-      allow read: if true;
-      allow write: if true; // Temporalmente permisivo
-    }
-
-    // Reservas: lectura y escritura de las propias reservas
+    match /catalogo/{docId} { allow read: if true; allow write: if isAdmin(); }
     match /reservas/{docId} {
-      allow read, write: if true; // Temporalmente permisivo
+      allow read: if isAuthenticated() && (request.auth.uid == resource.data.authUID || isStaff());
+      allow create: if isAuthenticated();
+      allow update, delete: if isAuthenticated() && (request.auth.uid == resource.data.authUID || isStaff());
     }
-
-    // Pagos: solo escritura (recepción registra), lectura restringida
-    match /pagos/{docId} {
-      allow read, write: if true; // Temporalmente permisivo
+    match /pagos/{docId} { allow read: if isStaff(); allow write: if isRecepcionOrAdmin(); }
+    match /config/{docId} { allow read: if true; allow write: if isAdmin(); }
+    match /usuarios_staff/{uid} {
+      allow read: if isAuthenticated() && request.auth.uid == uid;
+      allow write: if isAdmin();
     }
-
-    // Config: lectura pública (precios), escritura solo admin
-    match /config/{docId} {
-      allow read: if true;
-      allow write: if true; // Temporalmente permisivo
-    }
+    match /profesores/{docId} { allow read: if true; allow write: if isAdmin(); }
+    match /asistencias/{docId} { allow read: if isStaff(); allow write: if isAuthenticated(); }
+    match /comentarios_clases/{docId} { allow read: if isStaff(); allow write: if isAuthenticated(); }
   }
 }
 ```
 
-> ⚠️ Las reglas de arriba son **permisivas temporales** para no romper el flujo actual.
-> La siguiente fase debe migrar a Firebase Authentication para poder usar `request.auth.uid`.
+---
 
-### 2. Realtime Database Rules
+## ✅ Realtime Database Rules
 
 Ve a: Firebase Console → Realtime Database → Rules
 
@@ -65,57 +125,41 @@ Ve a: Firebase Console → Realtime Database → Rules
 {
   "rules": {
     "estatus_acceso": {
-      ".read": true,
-      ".write": true
+      ".read": "auth != null",
+      ".write": "auth != null"
     },
     "notificaciones": {
-      ".read": true,
-      ".write": true
+      ".read": "auth != null",
+      ".write": "auth != null"
     }
   }
 }
 ```
 
-### 3. Crear documento de configuración de inscripción
+---
 
-En Firestore, crea el documento:
-- **Colección**: `config`
-- **Documento ID**: `inscripcion`
-- **Campos**:
-  - `monto` (number): `800`
-  - `updatedAt` (timestamp): fecha actual
+## ✅ Documentos de configuración en Firestore
 
-Esto permite cambiar el precio de inscripción desde Firebase sin tocar el código.
-
-### 4. Verificar documentos de costos
-
-Asegúrate de que existan:
-- `config/costos_fitness` con campos `d1`–`d5` (precio regular) y `p1`–`p5` (pronto pago)
-- `config/costos_gimnasia` con los mismos campos
-
-Si no existen, el sistema usará los precios de fallback hardcodeados en el código.
+| Documento | Campos requeridos |
+|---|---|
+| `config/inscripcion` | `monto` (number, ej: 800) |
+| `config/costos_fitness` | `d1`–`d5` (precio regular), `p1`–`p5` (pronto pago) |
+| `config/costos_gimnasia` | `d1`–`d5`, `p1`–`p5` |
+| `config/contador_alumnos` | `ultimo_numero` (number) |
+| `config/contador_pagos` | `ultimo_numero` (number) |
 
 ---
 
-## 🚧 Mejoras de seguridad pendientes (fase 2)
-
-1. **Migrar a Firebase Authentication**: Crear usuarios con `createUserWithEmailAndPassword` o custom tokens.
-2. **Hash de contraseñas**: Usar Firebase Auth elimina la necesidad de manejar contraseñas manualmente.
-3. **Security Rules estrictas**: Una vez con Firebase Auth, usar `request.auth.uid === alumnoId` para restringir acceso.
-4. **Rate limiting en Cloud Functions**: Para `verificarCURP` y login, implementar rate limiting server-side.
-5. **Remover `password` y `pin` de documentos Firestore**: Una vez migrado a Firebase Auth, estos campos ya no son necesarios.
-
----
-
-## 📋 Cambios aplicados en este PR
+## 📋 Historial de cambios de seguridad
 
 | Problema | Solución |
 |---|---|
+| Contraseña `gymnastics2026` hardcodeada en HTML/JS | Eliminada; reemplazada por Firebase Auth |
+| Listeners de Firestore globales sin unsubscribe | Cancelados en logout (`_unsubDashboard`, etc.) |
+| Race condition al crear reservas | Cupo y reserva en misma transacción atómica |
+| `hoy` constante global en profesores.js | Reemplazada por `getHoy()` dinámico |
+| `quitarAlumnoDeClase` restauraba cupo de una sola clase | Ahora agrupa por `claseId` en planes semanaleses |
+| `setInterval` sin cleanup en alumno.js | Handle guardado y `clearInterval` en logout |
 | Datos sensibles (password, pin, curp) en localStorage | Solo se guarda el `id` del alumno |
-| Contraseñas en texto plano expuestas en memoria | Se eliminan del objeto USER después de autenticar |
-| 3 formas de autenticación inconsistentes | Unificado a comparación de string |
-| Sin rate-limit en verificarCURP | Rate-limit de 5 intentos en memoria |
-| Precios hardcodeados en alumno.js | Se cargan desde `config/costos_fitness` y `config/costos_gimnasia` |
-| Precio de inscripción hardcodeado en recepcion.js | Se carga desde `config/inscripcion` |
-| Archivos HTML con espacios y versiones `(2)` `(1)` | Renombrados a nombres limpios |
-| Falta documentación de campos hora/horaFin vs inicio/fin | Comentario agregado en schema.js |
+| Reglas permisivas `if true` en Firestore | Reemplazadas por reglas basadas en `request.auth` |
+| Archivos HTML duplicados | Eliminados los 4 archivos con `(2)` / `(1)` |

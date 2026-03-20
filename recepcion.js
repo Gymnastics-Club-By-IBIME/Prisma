@@ -42,6 +42,10 @@ let scannerCaja=null,scannerActivo=false;
 let clasesCached=[],claseActualID=null,claseViendoID=null,_unsubInscritosPanel=null;
 let alumnoMoverID=null,alumnoMoverReservaID=null;
 let areaFiltro='todo';
+// Staff session & unsubscribe handles for real-time dashboard listeners
+let _staffRol=null;
+let _unsubDashboard=null,_unsubOrdenesRtdb=null,_unsubPagosHoy=null,_unsubPreReservas=null;
+let _unsubCajaCatalogoPrin=null,_unsubCatalogoModal=null,_unsubCatalogoClases=null;
 
 // ── TOAST ────────────────────────────────────────────────────────
 function toast(m,ms=3000){const t=$('toast');t.textContent=m;t.classList.add('on');setTimeout(()=>t.classList.remove('on'),ms);}
@@ -65,8 +69,88 @@ function showView(id,btn){
 // ── RELOJ ────────────────────────────────────────────────────────
 setInterval(()=>$('reloj').textContent=new Date().toLocaleTimeString('es-MX'),1000);
 
-// ── DASHBOARD ────────────────────────────────────────────────────
-db.collection('alumnos').onSnapshot(snap=>{
+// ── STAFF AUTH ───────────────────────────────────────────────────
+async function doLoginStaff(){
+    const email=document.getElementById('staffEmail').value.trim();
+    const password=document.getElementById('staffPassword').value;
+    const errEl=document.getElementById('staffLoginError');
+    errEl.style.display='none';
+    if(!email||!password){errEl.style.display='block';return;}
+    try{
+        await firebase.auth().signInWithEmailAndPassword(email,password);
+        // onAuthStateChanged will call _iniciarSesionStaff
+    }catch(e){
+        console.error('Login staff error:',e);
+        errEl.style.display='block';
+    }
+}
+
+async function _iniciarSesionStaff(user){
+    try{
+        const snap=await db.collection('usuarios_staff').doc(user.uid).get();
+        if(!snap.exists){
+            toast('⛔ Tu cuenta no tiene acceso a este panel.');
+            await firebase.auth().signOut();return;
+        }
+        const data=snap.data();
+        if(data.rol!=='recepcion'&&data.rol!=='admin'){
+            toast('⛔ Rol sin permiso para este portal.');
+            await firebase.auth().signOut();return;
+        }
+        _staffRol=data.rol;
+        // Hide login, show app
+        const loginEl=document.getElementById('login-screen-staff');
+        if(loginEl)loginEl.style.display='none';
+        // Unlock "Ingresos" for admin
+        const sbIngresos=$('sbIngresos');
+        if(sbIngresos&&_staffRol==='admin'){
+            sbIngresos.style.opacity='1';sbIngresos.style.cursor='pointer';sbIngresos.style.filter='none';
+        }
+        // Start real-time listeners now that auth is verified
+        initDashboardListeners();
+        cargarConfigRecepcion();
+        toast('Bienvenido, '+data.nombre);
+    }catch(e){
+        console.error('Error al verificar staff:',e);
+        toast('Error al verificar sesión.');
+        await firebase.auth().signOut();
+    }
+}
+
+function doLogoutStaff(){
+    // Cancel all active listeners
+    if(_unsubDashboard){_unsubDashboard();_unsubDashboard=null;}
+    // RTDB off() removes all listeners on the ref (cleaner than passing the handler)
+    if(_unsubOrdenesRtdb){rtdb.ref('estatus_acceso').off();_unsubOrdenesRtdb=null;}
+    if(_unsubPagosHoy){_unsubPagosHoy();_unsubPagosHoy=null;}
+    if(_unsubPreReservas){_unsubPreReservas();_unsubPreReservas=null;}
+    if(_unsubInscritosPanel){_unsubInscritosPanel();_unsubInscritosPanel=null;}
+    if(_unsubCatalogoModal){_unsubCatalogoModal();_unsubCatalogoModal=null;}
+    if(_unsubCatalogoClases){_unsubCatalogoClases();_unsubCatalogoClases=null;}
+    _staffRol=null;
+    firebase.auth().signOut().catch(()=>{});
+    const loginEl=document.getElementById('login-screen-staff');
+    if(loginEl)loginEl.style.display='flex';
+}
+
+// Watch auth state to support session restore on page reload
+firebase.auth().onAuthStateChanged(function(user){
+    if(!user){
+        const loginEl=document.getElementById('login-screen-staff');
+        if(loginEl)loginEl.style.display='flex';
+        return;
+    }
+    // Already have staff role means we already initialized
+    if(_staffRol)return;
+    _iniciarSesionStaff(user);
+});
+
+// ── DASHBOARD LISTENERS (started after auth) ─────────────────────
+function initDashboardListeners(){
+    // Guard against double-init
+    if(_unsubDashboard)return;
+
+    _unsubDashboard=db.collection('alumnos').onSnapshot(snap=>{
     const hoy=new Date();let a=0,v=0;
     snap.forEach(d=>{const vf=d.data().vencimiento?new Date(d.data().vencimiento):new Date(0);vf>hoy?a++:v++;});
     $('dTotal').textContent=snap.size;$('dActivos').textContent=a;$('dVencidos').textContent=v;
@@ -76,9 +160,9 @@ db.collection('alumnos').onSnapshot(snap=>{
     prox.map(d=>`<div onclick="showView('caja');$('cajaBusca').value='${d.id}';buscarAlumnoCaja('${d.id}')" style="padding:.65rem .9rem;background:#fff7f6;border:1px solid #fecaca;border-radius:10px;cursor:pointer;display:flex;justify-content:space-between;align-items:center">
         <div><p style="font-weight:800;font-size:.75rem;text-transform:uppercase">${d.data().nombre}</p><p style="font-size:.6rem;color:var(--rojo);font-weight:600">Vence: ${d.data().vencimiento}</p></div>
         <i class="fa-solid fa-chevron-right" style="color:#fca5a5;font-size:.7rem"></i></div>`).join('');
-});
+    });
 
-rtdb.ref('estatus_acceso').on('value',snap=>{
+    const _ordenesHandler=snap=>{
     const o=snap.val()||{};const keys=Object.keys(o);
     $('dOrdenes').textContent=keys.length;
     // Llenar lista de órdenes en caja
@@ -110,11 +194,13 @@ rtdb.ref('estatus_acceso').on('value',snap=>{
         <button onclick="$('cajaBusca').value='${ord.id||k}';buscarAlumnoCaja('${ord.id||k}')" class="btn btn-azul" style="width:100%;justify-content:center;font-size:.65rem"><i class="fa-solid fa-cash-register"></i>Cobrar</button>
     </div>`;}
     ).join('');
-});
+    };
+    rtdb.ref('estatus_acceso').on('value',_ordenesHandler);
+    _unsubOrdenesRtdb=_ordenesHandler;
 
-// ── INGRESO DEL DÍA (cobros reales) ─────────────────────────────
-const hoyStr=new Date().toLocaleDateString('es-MX');
-db.collection('pagos').where('fechaString','==',hoyStr).onSnapshot(snap=>{
+    // ── INGRESO DEL DÍA (cobros reales) ─────────────────────────────
+    const hoyStr=new Date().toLocaleDateString('es-MX');
+    _unsubPagosHoy=db.collection('pagos').where('fechaString','==',hoyStr).onSnapshot(snap=>{
     let total=0,ef=0,tf=0;
     snap.forEach(d=>{const p=d.data();total+=(p.monto||0);if(p.metodo==='EFECTIVO')ef+=(p.monto||0);else tf+=(p.monto||0);});
     const fmt=n=>'$'+n.toLocaleString('es-MX',{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -144,9 +230,9 @@ db.collection('pagos').where('fechaString','==',hoyStr).onSnapshot(snap=>{
             }).join('');
         }
     }
-});
+    });
 
-db.collection('reservas').where('estado','==','pre-reserva').onSnapshot(snap=>{
+    _unsubPreReservas=db.collection('reservas').where('estado','==','pre-reserva').onSnapshot(snap=>{
     $('listaPreRes').innerHTML=snap.empty?'<p style="grid-column:1/-1;text-align:center;font-size:.72rem;color:#94a3b8;font-weight:600;padding:1.5rem">Sin pre-reservas</p>':
     snap.docs.map(d=>{const r=d.data();
         const horarioInfo=(r.dia&&r.hora)?`<p style="font-size:.6rem;color:#64748b;font-weight:600;margin-top:1px">📅 ${r.dia} ${r.hora}${r.horaFin?' – '+r.horaFin:''}</p>`:'';
@@ -159,7 +245,8 @@ db.collection('reservas').where('estado','==','pre-reserva').onSnapshot(snap=>{
         <button onclick="showView('caja');$('cajaBusca').value='${r.alumnoId}';buscarAlumnoCaja('${r.alumnoId}')" class="btn btn-azul" style="width:100%;justify-content:center;font-size:.6rem;padding:.4rem;margin-top:.5rem"><i class="fa-solid fa-cash-register"></i>Cobrar</button>
     </div>`;}
     ).join('');
-});
+    });
+} // end initDashboardListeners
 
 // ── REGISTRO ─────────────────────────────────────────────────────
 function toggleMatricula(){$('campoMatricula').style.display=$('rCondicion').value==='ALUMNO_EXTERNO'?'none':'block';}
@@ -452,7 +539,7 @@ async function publicarItem(){
     try{await db.collection('catalogo').add(payload);toast('✅ Publicado en catálogo');['catNombre','catPrecio','catIcon'].forEach(i=>$(i).value='');}
     catch(e){toast('❌ '+e.message);}
 }
-db.collection('catalogo').onSnapshot(snap=>{
+if(!_unsubCatalogoModal)_unsubCatalogoModal=db.collection('catalogo').onSnapshot(snap=>{
     $('gridCatalogo').innerHTML=snap.empty?'<p style="text-align:center;font-size:.72rem;color:#94a3b8;font-weight:600;padding:2rem">Catálogo vacío</p>':
     snap.docs.map(d=>{const i=d.data();return`<div style="display:flex;justify-content:space-between;align-items:center;padding:.7rem .9rem;background:#f8fafc;border:1px solid var(--border);border-radius:10px">
         <div style="display:flex;align-items:center;gap:.7rem">
@@ -979,22 +1066,18 @@ window.addEventListener('DOMContentLoaded',()=>{
     const fi=$('filtroMesIngr');if(fi)fi.value=mesActual;
     setInterval(()=>$('reloj').textContent=new Date().toLocaleTimeString('es-MX'),1000);
 });
-let ingresosDesbloqueado = false;
+let ingresosDesbloqueado = false; // kept for backward-compat, no longer used directly
 function abrirIngresos() {
-  if (ingresosDesbloqueado) { showView('ingresos', document.getElementById('sbIngresos')); return; }
-  $('pinIngresosInput').value = '';
-  $('modalPinIngresos').style.display = 'flex';
+  // Ingresos solo visible para admins — verificado por rol de Firebase Auth
+  if (_staffRol === 'admin') {
+    showView('ingresos', document.getElementById('sbIngresos'));
+  } else {
+    toast('⛔ Solo el administrador puede ver los ingresos.');
+  }
 }
+// Kept for backwards compatibility — no longer uses a hardcoded PIN
 function verificarPinIngresos() {
-  if ($('pinIngresosInput').value === 'gymnastics2026') {
-    ingresosDesbloqueado = true;
-    $('modalPinIngresos').style.display = 'none';
-    const sbItem = document.getElementById('sbIngresos');
-    sbItem.style.opacity = '1';
-    sbItem.style.cursor = 'pointer';
-    sbItem.style.filter = 'none';
-    showView('ingresos', sbItem);
-  } else { toast('❌ Contraseña incorrecta'); }
+  abrirIngresos();
 }
 
 let cuponAplicado = false;

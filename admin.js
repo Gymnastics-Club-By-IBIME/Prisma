@@ -2,6 +2,65 @@
 // Inicializado por assets/js/firebase-init.js
 const db=firebase.firestore();
 
+// ── ADMIN AUTH ────────────────────────────────────────────────────
+let _adminLoggedIn=false;
+let _unsubCatalogo=null,_unsubAlumnosCount=null;
+
+async function doLoginAdmin(){
+    const email=document.getElementById('adminEmail').value.trim();
+    const password=document.getElementById('adminPassword').value;
+    const errEl=document.getElementById('adminLoginError');
+    errEl.style.display='none';
+    if(!email||!password){errEl.style.display='block';return;}
+    try{
+        await firebase.auth().signInWithEmailAndPassword(email,password);
+        // onAuthStateChanged handles the rest
+    }catch(e){
+        console.error('Admin login error:',e);
+        errEl.style.display='block';
+    }
+}
+
+async function _iniciarSesionAdmin(user){
+    try{
+        const snap=await db.collection('usuarios_staff').doc(user.uid).get();
+        if(!snap.exists||snap.data().rol!=='admin'){
+            document.getElementById('adminLoginError').style.display='block';
+            await firebase.auth().signOut();return;
+        }
+        _adminLoggedIn=true;
+        const loginEl=document.getElementById('login-screen-admin');
+        if(loginEl)loginEl.style.display='none';
+        initAdminListeners();
+    }catch(e){
+        console.error('Error verificando admin:',e);
+        await firebase.auth().signOut();
+    }
+}
+
+function doLogoutAdmin(){
+    if(_unsubCatalogo){_unsubCatalogo();_unsubCatalogo=null;}
+    if(_unsubAlumnosCount){_unsubAlumnosCount();_unsubAlumnosCount=null;}
+    _adminLoggedIn=false;
+    firebase.auth().signOut().catch(()=>{});
+    const loginEl=document.getElementById('login-screen-admin');
+    if(loginEl)loginEl.style.display='flex';
+}
+
+firebase.auth().onAuthStateChanged(function(user){
+    if(!user){
+        const loginEl=document.getElementById('login-screen-admin');
+        if(loginEl)loginEl.style.display='flex';
+        return;
+    }
+    if(_adminLoggedIn)return;
+    _iniciarSesionAdmin(user);
+});
+
+function initAdminListeners(){
+    if(_unsubCatalogo)return;
+    _unsubCatalogo=db.collection('catalogo').where('tipo','==','clase').onSnapshot(snap=>{
+
 // ── TOAST ─────────────────────────────────────────────────────────
 function toast(m,ms=3000){document.getElementById('toastMsg').innerText=m;const el=document.getElementById('toast');el.classList.add('show');setTimeout(()=>el.classList.remove('show'),ms);}
 
@@ -866,7 +925,8 @@ function switchTab(id,btn){
 }
 
 // ── FIREBASE LISTENERS ────────────────────────────────────────────
-db.collection('catalogo').where('tipo','==','clase').onSnapshot(snap=>{
+// These are now started inside initAdminListeners() after auth is confirmed.
+// The function header is added at the top of admin.js.
   fbDocsMap=new Map();
   snap.docs.forEach(d=>{
     const x=d.data();
@@ -893,7 +953,8 @@ db.collection('catalogo').where('tipo','==','clase').onSnapshot(snap=>{
     renderEditPanel(celdaActiva.hora,celdaActiva.dia,celdaActiva.area,celdaActiva.franjaIdx);
   }
 });
-db.collection('alumnos').onSnapshot(s=>document.getElementById('hTotalAlumnos').innerText=s.size);
+_unsubAlumnosCount=db.collection('alumnos').onSnapshot(s=>document.getElementById('hTotalAlumnos').innerText=s.size);
+} // end initAdminListeners
 
 // ── INIT ──────────────────────────────────────────────────────────
 renderGrid(HORARIO_FITNESS,'gridFitness','fitness');
