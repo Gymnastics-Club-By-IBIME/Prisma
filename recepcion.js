@@ -120,7 +120,8 @@ async function _iniciarSesionStaff(user){
 function doLogoutStaff(){
     // Cancel all active listeners
     if(_unsubDashboard){_unsubDashboard();_unsubDashboard=null;}
-    if(_unsubOrdenesRtdb){rtdb.ref('estatus_acceso').off('value',_unsubOrdenesRtdb);_unsubOrdenesRtdb=null;}
+    // RTDB off() removes all listeners on the ref (cleaner than passing the handler)
+    if(_unsubOrdenesRtdb){rtdb.ref('estatus_acceso').off();_unsubOrdenesRtdb=null;}
     if(_unsubPagosHoy){_unsubPagosHoy();_unsubPagosHoy=null;}
     if(_unsubPreReservas){_unsubPreReservas();_unsubPreReservas=null;}
     if(_unsubInscritosPanel){_unsubInscritosPanel();_unsubInscritosPanel=null;}

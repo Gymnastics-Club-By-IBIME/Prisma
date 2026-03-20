@@ -421,3 +421,59 @@ No se requiere build ni Node.js. Solo sube los archivos y activa GitHub Pages de
 - Las reservas legacy (sin `planSemanal: true`) siguen funcionando en "Mis Clases" (sección separada "Otras reservas").
 - El portal de profesores muestra alumnos de hoy filtrando por `fechaClase == hoy` si el campo existe, o todos los inscritos si no (backwards compatible).
 - Los nuevos estados `pendiente_pago` y `cancelada` son equivalentes semánticos de `pre-reserva` y se tratan igual en las UI que verifican `estado`.
+
+---
+
+## Configuración de Firebase Auth
+
+### Prerrequisitos
+1. Activa **Authentication** en Firebase Console (Email/Password como mínimo)
+2. Para alumnos con Google/Apple, activa también esos proveedores en Firebase Console
+
+### Crear usuarios de staff
+
+Ve a **Firebase Console → Authentication → Users → Añadir usuario**:
+
+| Rol | Email | Contraseña |
+|---|---|---|
+| Admin | `admin@prisma.com` | (define segura) |
+| Recepción | `recepcion@prisma.com` | (define segura) |
+| Caja | `caja@prisma.com` | (define segura) |
+
+Para profesores, el formato del email es `profe.{id_del_profesor}@prisma.com` donde
+`{id_del_profesor}` coincide con el ID del documento en la colección `profesores`.
+
+Ejemplo: si el documento es `profesores/juan-garcia`, el email es `profe.juan-garcia@prisma.com`.
+
+### Crear documentos de staff en Firestore
+
+Por cada usuario creado, copia su UID y crea el documento `usuarios_staff/{uid}`:
+
+```json
+{
+  "correo": "recepcion@prisma.com",
+  "rol": "recepcion",
+  "nombre": "Personal de Recepción",
+  "createdAt": "<timestamp>"
+}
+```
+
+Los roles disponibles son: `admin`, `recepcion`, `caja`.
+
+### Flujo de autenticación
+
+- **Profesores**: Seleccionan su nombre + ingresan su contraseña → Firebase Auth con `profe.{id}@prisma.com`
+- **Recepción / Admin**: Ingresan email + contraseña en pantalla de login → se valida rol en `usuarios_staff`
+- **Alumnos**: Mantienen el flujo ID + PIN/contraseña (sin cambio). Opcionalmente pueden usar Google/Apple;
+  en el primer acceso se les pide vincular su ID de matrícula.
+
+### Roles y permisos
+
+| Rol | Acceso |
+|---|---|
+| `admin` | Panel Admin, Panel Recepción (con acceso a Ingresos), Portal Profesores |
+| `recepcion` | Panel Recepción (sin Ingresos) |
+| `caja` | Panel Recepción (área de cobros) |
+| Profesores | Portal Profesores (su propio perfil) |
+| Alumnos | Portal Alumno (sus datos y reservas) |
+
