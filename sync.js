@@ -219,9 +219,17 @@
         // Borrar todas las reservas del slot
         snapSlot.docs.forEach(d => batch.delete(d.ref));
 
-        // Liberar N cupos (todas las sesiones pertenecen a la misma clase)
-        batch.update(db.collection('catalogo').doc(claseId), {
-          cupoDisponible: firebase.firestore.FieldValue.increment(n)
+        // Restaurar cupos agrupando por claseId, ya que un plan semanal puede
+        // tener sesiones en múltiples clases distintas.
+        const cuposPorClase = {};
+        snapSlot.docs.forEach(d => {
+          const cid = d.data().claseId;
+          cuposPorClase[cid] = (cuposPorClase[cid] || 0) + 1;
+        });
+        Object.entries(cuposPorClase).forEach(([cid, count]) => {
+          batch.update(db.collection('catalogo').doc(cid), {
+            cupoDisponible: firebase.firestore.FieldValue.increment(count)
+          });
         });
 
         await batch.commit();

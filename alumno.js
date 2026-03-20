@@ -15,6 +15,8 @@ const db=firebase.firestore(),rtdb=firebase.database();
 
 let USER=null,CART=[],CATALOGO=[],MIS_RESERVAS=[],ORDEN_ACTIVA=null;
 let AREA_SEL=null,DISCIPS_SEL=new Set(),PKG=1;
+// Handle for checkClaseActual periodic timer — stored so it can be cleared on logout
+let _checkClaseInterval=null;
 // Etapa 2: plan semanal
 let PLAN_Y=4; // número de clases por semana seleccionadas
 let SLOTS_SEL=[]; // array de slots seleccionados: [{claseId,claseNombre,dia,hora,horaFin,profesor,area,icon}]
@@ -80,6 +82,82 @@ window.addEventListener('DOMContentLoaded',async()=>{
         }catch{localStorage.removeItem('ib_session');}
     }
 });
+
+// ════════════════════════════════════════════════════════════════
+// SOCIAL LOGIN (Google / Apple) — opcional para alumnos públicos
+// ════════════════════════════════════════════════════════════════
+let _socialUserPending = null; // Firebase user waiting to be linked
+
+async function loginConGoogle() {
+    try {
+        const provider = new firebase.auth.GoogleAuthProvider();
+        const result = await firebase.auth().signInWithPopup(provider);
+        await _procesarLoginSocial(result.user);
+    } catch(e) {
+        if (e.code !== 'auth/popup-closed-by-user') {
+            showLErr('login', 'Error con Google: ' + e.message);
+        }
+    }
+}
+
+async function loginConApple() {
+    try {
+        const provider = new firebase.auth.OAuthProvider('apple.com');
+        provider.addScope('email');
+        provider.addScope('name');
+        const result = await firebase.auth().signInWithPopup(provider);
+        await _procesarLoginSocial(result.user);
+    } catch(e) {
+        if (e.code !== 'auth/popup-closed-by-user') {
+            showLErr('login', 'Error con Apple: ' + e.message);
+        }
+    }
+}
+
+async function _procesarLoginSocial(user) {
+    // Check if this UID is already linked to an alumno document
+    const snap = await db.collection('alumnos').where('authUID', '==', user.uid).limit(1).get();
+    if (!snap.empty) {
+        // Already linked — enter portal directly
+        const doc = snap.docs[0];
+        const data = doc.data();
+        localStorage.setItem('ib_session', doc.id);
+        USER = { id: doc.id, ...data };
+        delete USER.password; delete USER.pin; delete USER.curp;
+        entrarPortal();
+    } else {
+        // First time — show link modal
+        _socialUserPending = user;
+        document.getElementById('modalVincular').style.display = 'flex';
+    }
+}
+
+async function confirmarVinculo() {
+    const id = document.getElementById('vincularID').value.trim().toUpperCase();
+    const errEl = document.getElementById('vincularErr');
+    errEl.style.display = 'none';
+    if (!id || !_socialUserPending) return;
+    try {
+        const snap = await db.collection('alumnos').doc(id).get();
+        if (!snap.exists) { errEl.textContent = 'ID no encontrado'; errEl.style.display = 'block'; return; }
+        // Save authUID to alumno document
+        await db.collection('alumnos').doc(id).update({ authUID: _socialUserPending.uid });
+        localStorage.setItem('ib_session', id);
+        const data = snap.data();
+        USER = { id, ...data, authUID: _socialUserPending.uid };
+        delete USER.password; delete USER.pin; delete USER.curp;
+        document.getElementById('modalVincular').style.display = 'none';
+        _socialUserPending = null;
+        entrarPortal();
+    } catch(e) {
+        errEl.textContent = 'Error: ' + e.message; errEl.style.display = 'block';
+    }
+}
+
+function cancelarVinculo() {
+    document.getElementById('modalVincular').style.display = 'none';
+    if (_socialUserPending) { firebase.auth().signOut().catch(() => {}); _socialUserPending = null; }
+}
 
 // ════════════════════════════════════════════════════════════════
 // DO LOGIN
@@ -149,7 +227,11 @@ function entrarPortal(){
     portal.classList.add('visible');
     iniciarPortal();
 }
-function logout(){localStorage.removeItem('ib_session');location.reload();}
+function logout(){
+    if(_checkClaseInterval){clearInterval(_checkClaseInterval);_checkClaseInterval=null;}
+    localStorage.removeItem('ib_session');
+    location.reload();
+}
 
 // ════════════════════════════════════════════════════════════════
 // INICIAR PORTAL
@@ -250,7 +332,7 @@ function iniciarPortal(){
     // Primer acceso
     if(USER.primerAcceso===true||(!USER.password)||(USER.pin&&String(USER.password||'')=== String(USER.pin||'')))setTimeout(()=>$( 'modalPass').classList.add('on'),800);
     // Notificaciones automáticas cada 60 segundos
-    setInterval(checkClaseActual,60000);
+    _checkClaseInterval=setInterval(checkClaseActual,60000);
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -1244,48 +1326,54 @@ async function confirmarOrden(){
         });
         const folio='IBY-PAG-'+String(num).padStart(10,'0');
         // Pre-reservar clases tipo 'clase' (flujo normal desde horarios)
+        // Se usa una transacción atómica que incluye tanto el decremento de cupo
+        // como la creación de la reserva para evitar race conditions.
         for(const item of CART.filter(i=>i.tipo==='clase'&&i.claseId)){
             const cid=item.claseId;
             const cl=CATALOGO.find(x=>x.id===cid);if(!cl)continue;
+            const nuevaReservaRef=db.collection('reservas').doc();
             await db.runTransaction(async tx=>{
                 const ref=db.collection('catalogo').doc(cid);
                 const s=await tx.get(ref);if(!s.exists)return;
                 const disp=s.data().cupoDisponible??s.data().cupo??0;
                 if(disp>0)tx.update(ref,{cupoDisponible:firebase.firestore.FieldValue.increment(-1)});
-            });
-            await db.collection('reservas').add({
-                alumnoId:USER.id,alumnoNombre:USER.nombre,
-                claseId:cid,claseNombre:cl.nombre,area:cl.area||item.area,
-                folio,estado:'pre-reserva',alertaMostrada:false,timestamp:Date.now(),
-                frecuenciaSem:item.frecuencia||null,
-                // Información de horario para mostrar en "Mis Clases"
-                dia:item.dia||cl.dia||'',
-                hora:item.hora||cl.inicio||'',
-                horaFin:item.horaFin||cl.fin||'',
-                profesor:item.profesor||cl.profesor||'',
-                // Control de pases
-                pasesTotal:item.frecuencia||1,
-                pasesRestantes:item.frecuencia||1
+                tx.set(nuevaReservaRef,{
+                    alumnoId:USER.id,alumnoNombre:USER.nombre,
+                    claseId:cid,claseNombre:cl.nombre,area:cl.area||item.area,
+                    folio,estado:'pre-reserva',alertaMostrada:false,timestamp:Date.now(),
+                    frecuenciaSem:item.frecuencia||null,
+                    // Información de horario — compatibilidad con ambos esquemas
+                    dia:item.dia||cl.dia||'',
+                    hora:item.hora||cl.inicio||'',
+                    horaFin:item.horaFin||cl.fin||'',
+                    inicio:cl.inicio||'',
+                    fin:cl.fin||'',
+                    profesor:item.profesor||cl.profesor||'',
+                    // Control de pases
+                    pasesTotal:item.frecuencia||1,
+                    pasesRestantes:item.frecuencia||1
+                });
             });
         }
         // Pre-reservar clases de mensualidades (flujo legado)
         for(const item of CART.filter(i=>i.tipo==='mensualidad'&&i.clasesIds)){
             for(const cid of item.clasesIds){
                 const cl=CATALOGO.find(x=>x.id===cid);if(!cl)continue;
+                const nuevaReservaRef=db.collection('reservas').doc();
                 await db.runTransaction(async tx=>{
                     const ref=db.collection('catalogo').doc(cid);
                     const s=await tx.get(ref);if(!s.exists)return;
                     const disp=s.data().cupoDisponible??s.data().cupo??0;
                     if(disp>0)tx.update(ref,{cupoDisponible:firebase.firestore.FieldValue.increment(-1)});
-                });
-                await db.collection('reservas').add({
-                    alumnoId:USER.id,alumnoNombre:USER.nombre,
-                    claseId:cid,claseNombre:cl.nombre,area:cl.area||item.area,
-                    folio,estado:'pre-reserva',alertaMostrada:false,timestamp:Date.now(),
-                    frecuenciaSem:item.frecuencia||null,
-                    dia:'',hora:'',horaFin:'',profesor:'',
-                    pasesTotal:item.frecuencia||1,
-                    pasesRestantes:item.frecuencia||1
+                    tx.set(nuevaReservaRef,{
+                        alumnoId:USER.id,alumnoNombre:USER.nombre,
+                        claseId:cid,claseNombre:cl.nombre,area:cl.area||item.area,
+                        folio,estado:'pre-reserva',alertaMostrada:false,timestamp:Date.now(),
+                        frecuenciaSem:item.frecuencia||null,
+                        dia:'',hora:'',horaFin:'',inicio:'',fin:'',profesor:'',
+                        pasesTotal:item.frecuencia||1,
+                        pasesRestantes:item.frecuencia||1
+                    });
                 });
             }
         }

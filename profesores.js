@@ -19,7 +19,10 @@ let qrScanner = null;
 // Unsubscribe handles for real-time listeners
 let _unsubClases = null;
 let _unsubAlumnos = null;
-const hoy = new Date().toISOString().split('T')[0];
+// Handle for checkClaseActual interval (not used in this portal, kept for consistency)
+let _checkClaseInterval = null;
+// Dynamic date — recalculated each call so sessions crossing midnight use the correct date
+function getHoy() { return new Date().toISOString().split('T')[0]; }
 
 // ─── CLOCK ───────────────────────────────────────
 function updateClock() {
@@ -109,11 +112,24 @@ async function doLogin() {
   errEl.style.display = 'none';
 
   if (!sel.value) { toast('Por favor selecciona tu nombre', 'error'); return; }
-  if (pwd.value !== 'gymnastics2026') { errEl.style.display = 'block'; return; }
+  if (!pwd.value) { toast('Ingresa tu contraseña', 'error'); return; }
+
+  // Build internal email: profe.{profesorId}@prisma.com
+  const emailInterno = 'profe.' + sel.value + '@prisma.com';
 
   try {
-    const snap = await db.collection('profesores').doc(sel.value).get();
-    if (!snap.exists) { toast('Profesor no encontrado', 'error'); return; }
+    await firebase.auth().signInWithEmailAndPassword(emailInterno, pwd.value);
+    // onAuthStateChanged will call _iniciarSesionProfesor after successful auth
+  } catch (e) {
+    console.error('Error en login:', e);
+    errEl.style.display = 'block';
+  }
+}
+
+async function _iniciarSesionProfesor(profesorId) {
+  try {
+    const snap = await db.collection('profesores').doc(profesorId).get();
+    if (!snap.exists) { toast('Profesor no encontrado en la base de datos', 'error'); await firebase.auth().signOut(); return; }
     profesorActual = { id: snap.id, ...snap.data() };
 
     // Update sidebar
@@ -129,10 +145,32 @@ async function doLogin() {
     toast(`Bienvenido, ${profesorActual.nombre}!`, 'success');
     loadClasesProfesor(); // inicia listener en tiempo real (no necesita await)
   } catch (e) {
-    console.error('Error en login:', e);
+    console.error('Error al iniciar sesión de profesor:', e);
     toast('Error al iniciar sesión: ' + e.message, 'error');
   }
 }
+
+// Observe Firebase Auth state to support session restore across page loads
+firebase.auth().onAuthStateChanged(async (user) => {
+  if (!user) {
+    // No active session — show login
+    document.getElementById('login-screen').style.display = 'flex';
+    const appEl = document.getElementById('app');
+    if (appEl) appEl.classList.remove('visible');
+    return;
+  }
+  // Extract profesorId from internal email (profe.{id}@prisma.com)
+  const match = user.email && user.email.match(/^profe\.(.+)@prisma\.com$/);
+  if (match) {
+    const profesorId = match[1];
+    if (!profesorActual) {
+      await _iniciarSesionProfesor(profesorId);
+    }
+  } else {
+    // Email doesn't match expected professor format — sign out
+    await firebase.auth().signOut();
+  }
+});
 
 // ─── LOGOUT ──────────────────────────────────────
 function doLogout() {
@@ -146,7 +184,9 @@ function doLogout() {
   document.getElementById('app').classList.remove('visible');
   document.getElementById('login-screen').style.display = 'flex';
   document.getElementById('sel-profesor').value = '';
+  document.getElementById('inp-password').value = '';
   showView('dashboard');
+  firebase.auth().signOut().catch(() => {});
   toast('Sesión cerrada', 'info');
 }
 
@@ -245,7 +285,7 @@ async function loadDashboardStats() {
       let count = 0;
       for (const nombre of nombresClases) {
         const snap = await db.collection('asistencias')
-          .where('fecha', '==', hoy)
+          .where('fecha', '==', getHoy())
           .where('claseNombre', '==', nombre)
           .get();
         count += snap.size;
@@ -434,7 +474,7 @@ async function saveAttendance() {
         claseNombre: claseActual.nombre || '',
         profesorId: profesorActual.id,
         profesorNombre: profesorActual.nombre,
-        fecha: hoy,
+        fecha: getHoy(),
         hora,
         tipo,
         timestamp: firebase.firestore.FieldValue.serverTimestamp()
@@ -479,7 +519,7 @@ async function saveComments() {
       claseNombre: claseActual.nombre || '',
       profesorId: profesorActual.id,
       profesorNombre: profesorActual.nombre,
-      fecha: hoy,
+      fecha: getHoy(),
       temas,
       observaciones: obs,
       incidencias: inc,
