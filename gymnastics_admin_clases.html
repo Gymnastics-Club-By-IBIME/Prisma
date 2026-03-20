@@ -63,6 +63,7 @@
   <button class="tab pub"        onclick="switchTab('publicar',this)">🚀 Firebase</button>
   <button class="tab imp"        onclick="switchTab('importar',this)">⚡ Carga masiva</button>
   <button class="tab" style="color:#34d399;border-color:rgba(52,211,153,.25)" onclick="switchTab('alumno',this)">👁 Vista Alumno</button>
+  <button class="tab" style="color:#a5b4fc;border-color:rgba(165,180,252,.25)" onclick="switchTab('profesores',this)">👨‍🏫 Profesores</button>
 </div>
 
 <main>
@@ -199,7 +200,90 @@
   <div id="vistaAlumnoGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:1rem"></div>
 </div>
 
+<!-- ══ PROFESORES ══ -->
+<div id="view-profesores" class="view">
+  <div class="horario-header">
+    <div class="horario-titulo" style="font-size:1.6rem">Gestión de <span style="color:#a5b4fc">Profesores</span></div>
+  </div>
+  <div class="layout-split" style="grid-template-columns:1fr 320px">
+    <!-- Columna izquierda -->
+    <div>
+      <!-- Formulario de creación -->
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1.2rem;margin-bottom:1.2rem">
+        <div class="sp-title"><div class="dot" style="background:#a5b4fc"></div> Crear Nuevo Profesor</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:.6rem;margin-bottom:.6rem">
+          <div>
+            <label style="font-size:.58rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);display:block;margin-bottom:.25rem">Nombre completo *</label>
+            <input id="profNombre" type="text" placeholder="Ej: Juan García" oninput="emailPreviewProfesor()"
+              style="width:100%;background:rgba(255,255,255,.05);border:1px solid var(--border);border-radius:7px;padding:.5rem .7rem;color:var(--txt);font-size:.75rem;font-family:'DM Sans',sans-serif;outline:none;box-sizing:border-box">
+          </div>
+          <div>
+            <label style="font-size:.58rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);display:block;margin-bottom:.25rem">Celular *</label>
+            <input id="profCelular" type="text" placeholder="Ej: 5512345678"
+              style="width:100%;background:rgba(255,255,255,.05);border:1px solid var(--border);border-radius:7px;padding:.5rem .7rem;color:var(--txt);font-size:.75rem;font-family:'DM Sans',sans-serif;outline:none;box-sizing:border-box">
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:.6rem;margin-bottom:.6rem">
+          <div>
+            <label style="font-size:.58rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);display:block;margin-bottom:.25rem">Disciplina asignada</label>
+            <select id="profDisciplina"
+              style="width:100%;background:rgba(255,255,255,.05);border:1px solid var(--border);border-radius:7px;padding:.5rem .7rem;color:var(--txt);font-size:.75rem;font-family:'DM Sans',sans-serif;outline:none;box-sizing:border-box">
+              <option value="">— Sin disciplina asignada —</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:.58rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);display:block;margin-bottom:.25rem">Contraseña inicial * (mín. 6 chars)</label>
+            <div style="position:relative">
+              <input id="profPassword" type="password" placeholder="••••••••"
+                style="width:100%;background:rgba(255,255,255,.05);border:1px solid var(--border);border-radius:7px;padding:.5rem 2rem .5rem .7rem;color:var(--txt);font-size:.75rem;font-family:'DM Sans',sans-serif;outline:none;box-sizing:border-box">
+              <button onclick="this.previousElementSibling.type=this.previousElementSibling.type==='password'?'text':'password'"
+                style="position:absolute;right:.4rem;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--muted);cursor:pointer;font-size:.75rem;padding:0">👁</button>
+            </div>
+          </div>
+        </div>
+        <div style="margin-bottom:.8rem;padding:.5rem .7rem;background:rgba(165,180,252,.07);border:1px solid rgba(165,180,252,.2);border-radius:7px">
+          <span style="font-size:.58rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--muted)">Email que se creará: </span>
+          <span id="profEmailPreview" style="font-size:.72rem;font-weight:700;color:#a5b4fc">—</span>
+        </div>
+        <button onclick="crearProfesor()" class="btn btn-primary" style="background:rgba(165,180,252,.18);color:#a5b4fc;border:1px solid rgba(165,180,252,.35)">➕ Crear Profesor</button>
+      </div>
+
+      <!-- Lista de profesores -->
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1.2rem">
+        <div class="sp-title" style="margin-bottom:.8rem"><div class="dot" style="background:#a5b4fc"></div> Lista de Profesores <span id="profCount" style="font-size:.6rem;font-weight:700;color:var(--muted);margin-left:.4rem"></span></div>
+        <input id="buscaProfesor" type="text" placeholder="🔍 Buscar profesor..." oninput="filtrarProfesores(this.value)"
+          style="width:100%;background:rgba(255,255,255,.05);border:1px solid var(--border);border-radius:7px;padding:.45rem .7rem;color:var(--txt);font-size:.73rem;font-family:'DM Sans',sans-serif;outline:none;box-sizing:border-box;margin-bottom:.8rem">
+        <div id="listaProfesores">
+          <p style="font-size:.7rem;color:var(--muted);text-align:center;padding:1.5rem 0">Cargando profesores...</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Columna derecha: panel de edición -->
+    <div class="sidebar-panel" style="position:sticky;top:76px">
+      <div class="sp-title"><div class="dot" style="background:#a5b4fc"></div> Editar Profesor</div>
+      <div id="profEditPanel">
+        <p style="font-size:.7rem;color:var(--muted);text-align:center;padding:1.5rem 0">Selecciona un profesor para editarlo</p>
+      </div>
+    </div>
+  </div>
+</div>
+
 </main>
+
+<!-- Modal confirmación contraseña admin -->
+<div id="modalConfirmAdminPwd" style="position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;display:none;align-items:center;justify-content:center;padding:1.5rem">
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1.5rem;width:100%;max-width:360px">
+    <p style="font-weight:900;font-size:.9rem;text-transform:uppercase;margin-bottom:.3rem">🔐 Confirma tu contraseña</p>
+    <p style="font-size:.7rem;color:var(--muted);margin-bottom:1rem">Para crear el usuario de acceso del profesor necesitamos re-autenticarte brevemente.</p>
+    <input id="adminPwdConfirm" type="password" placeholder="Tu contraseña de admin"
+      style="width:100%;background:rgba(255,255,255,.05);border:1px solid var(--border);border-radius:7px;padding:.55rem .75rem;color:var(--txt);font-size:.8rem;font-family:'DM Sans',sans-serif;outline:none;box-sizing:border-box;margin-bottom:.75rem">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem">
+      <button onclick="confirmarCreacionProfesor()" class="btn btn-primary">Confirmar y crear</button>
+      <button onclick="cancelarCreacionProfesor()" class="btn btn-ghost">Cancelar</button>
+    </div>
+  </div>
+</div>
 
 <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
