@@ -5,6 +5,10 @@ const db=firebase.firestore();
 // ── ADMIN AUTH ────────────────────────────────────────────────────
 let _adminLoggedIn=false;
 let _unsubCatalogo=null,_unsubAlumnosCount=null;
+let _unsubProfesores=null;
+let _profesoresCached=[];
+let _profesorEditandoId=null;
+let _pendingProfesorData=null;
 
 async function doLoginAdmin(){
     const email=document.getElementById('adminEmail').value.trim();
@@ -41,6 +45,7 @@ async function _iniciarSesionAdmin(user){
 function doLogoutAdmin(){
     if(_unsubCatalogo){_unsubCatalogo();_unsubCatalogo=null;}
     if(_unsubAlumnosCount){_unsubAlumnosCount();_unsubAlumnosCount=null;}
+    if(_unsubProfesores){_unsubProfesores();_unsubProfesores=null;}
     _adminLoggedIn=false;
     firebase.auth().signOut().catch(()=>{});
     const loginEl=document.getElementById('login-screen-admin');
@@ -922,6 +927,7 @@ function switchTab(id,btn){
   btn.classList.add('active');
   if(id==='publicar')renderPubGrid();
   if(id==='alumno')renderVistaAlumno();
+  if(id==='profesores')cargarDisciplinasEnSelect('profDisciplina');
 }
 
 // ── FIREBASE LISTENERS ────────────────────────────────────────────
@@ -954,6 +960,7 @@ function switchTab(id,btn){
   }
 });
 _unsubAlumnosCount=db.collection('alumnos').onSnapshot(s=>document.getElementById('hTotalAlumnos').innerText=s.size);
+  cargarListaProfesores();
 } // end initAdminListeners
 
 // ── INIT ──────────────────────────────────────────────────────────
@@ -1131,4 +1138,266 @@ function renderVistaAlumno(area){
 
   document.getElementById('vistaAlumnoGrid').innerHTML=html||
     '<p style="color:var(--muted);font-size:.8rem;font-weight:600;padding:2rem;grid-column:1/-1;text-align:center">Sin clases configuradas</p>';
+}
+
+// ── PROFESORES ────────────────────────────────────────────────────
+
+function _esc(str){
+  if(!str)return'';
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+function generarIdProfesor(nombre){
+  return nombre.toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .replace(/\s+/g,'-')
+    .replace(/[^a-z0-9-]/g,'')
+    .replace(/-+/g,'-')
+    .replace(/^-|-$/g,'');
+}
+
+function emailPreviewProfesor(){
+  const nombre=document.getElementById('profNombre').value;
+  const id=generarIdProfesor(nombre);
+  const email=id?'profe.'+id+'@prisma.com':'—';
+  const el=document.getElementById('profEmailPreview');
+  if(el)el.textContent=email;
+}
+
+async function crearProfesor(){
+  const nombre=(document.getElementById('profNombre').value||'').trim();
+  const celular=(document.getElementById('profCelular').value||'').trim();
+  const disciplina=document.getElementById('profDisciplina').value||'';
+  const password=document.getElementById('profPassword').value||'';
+  if(!nombre){toast('⚠️ Ingresa el nombre del profesor');return;}
+  if(!celular){toast('⚠️ Ingresa el celular del profesor');return;}
+  if(password.length<6){toast('⚠️ La contraseña debe tener al menos 6 caracteres');return;}
+  const profesorId=generarIdProfesor(nombre);
+  if(!profesorId){toast('⚠️ Nombre inválido para generar ID');return;}
+  const emailInterno='profe.'+profesorId+'@prisma.com';
+  // Check if profesor doc already exists
+  try{
+    const snap=await db.collection('profesores').doc(profesorId).get();
+    if(snap.exists){toast('⚠️ Ya existe un profesor con ese nombre/ID: '+profesorId);return;}
+  }catch(e){toast('❌ Error al verificar: '+e.message);return;}
+  _pendingProfesorData={nombre,celular,disciplina,profesorId,emailInterno,password};
+  document.getElementById('adminPwdConfirm').value='';
+  document.getElementById('modalConfirmAdminPwd').style.display='flex';
+}
+
+async function confirmarCreacionProfesor(){
+  const adminPwd=document.getElementById('adminPwdConfirm').value;
+  if(!adminPwd){toast('Ingresa tu contraseña de admin');return;}
+  const{nombre,celular,disciplina,profesorId,emailInterno,password}=_pendingProfesorData;
+  const adminEmail=firebase.auth().currentUser.email;
+  document.getElementById('modalConfirmAdminPwd').style.display='none';
+  toast('⏳ Creando usuario...');
+  let profesorUID=null;
+  try{
+    const cred=await firebase.auth().createUserWithEmailAndPassword(emailInterno,password);
+    profesorUID=cred.user.uid;
+    await firebase.auth().signOut();
+    await firebase.auth().signInWithEmailAndPassword(adminEmail,adminPwd);
+    await db.collection('profesores').doc(profesorId).set({
+      nombre,celular,
+      disciplina:disciplina||'',
+      authUID:profesorUID,
+      correo:emailInterno,
+      createdAt:firebase.firestore.FieldValue.serverTimestamp()
+    });
+    if(disciplina){
+      const snapCat=await db.collection('catalogo')
+        .where('tipo','==','clase')
+        .where('nombre','==',disciplina).get();
+      const batch=db.batch();
+      snapCat.docs.forEach(d=>batch.update(d.ref,{profesor:nombre,profesorId}));
+      if(!snapCat.empty)await batch.commit();
+    }
+    document.getElementById('profNombre').value='';
+    document.getElementById('profCelular').value='';
+    document.getElementById('profDisciplina').value='';
+    document.getElementById('profPassword').value='';
+    document.getElementById('profEmailPreview').textContent='—';
+    _pendingProfesorData=null;
+    toast('✅ Profesor '+nombre+' creado correctamente');
+  }catch(e){
+    console.error('Error creando profesor:',e);
+    if(profesorUID&&!firebase.auth().currentUser){
+      try{await firebase.auth().signInWithEmailAndPassword(adminEmail,adminPwd);}catch(_){}
+    }
+    toast('❌ Error: '+(e.message||'Error desconocido'));
+  }
+}
+
+function cancelarCreacionProfesor(){
+  document.getElementById('modalConfirmAdminPwd').style.display='none';
+  document.getElementById('adminPwdConfirm').value='';
+  _pendingProfesorData=null;
+}
+
+function cargarListaProfesores(){
+  if(_unsubProfesores){_unsubProfesores();_unsubProfesores=null;}
+  _unsubProfesores=db.collection('profesores').orderBy('nombre').onSnapshot(snap=>{
+    _profesoresCached=snap.docs.map(d=>({id:d.id,...d.data()}));
+    const countEl=document.getElementById('profCount');
+    if(countEl)countEl.textContent=_profesoresCached.length+' profesores';
+    renderListaProfesores(_profesoresCached);
+    cargarDisciplinasEnSelect('profDisciplina');
+    cargarDisciplinasEnSelect('editProfDisciplina');
+  },err=>{
+    console.error('Error cargando profesores:',err);
+  });
+}
+
+function renderListaProfesores(lista){
+  const cont=document.getElementById('listaProfesores');
+  if(!cont)return;
+  if(!lista||lista.length===0){
+    cont.innerHTML='<p style="font-size:.7rem;color:var(--muted);text-align:center;padding:1.5rem 0">Sin profesores registrados</p>';
+    return;
+  }
+  cont.innerHTML=lista.map(p=>{
+    const inicial=(p.nombre||'?').charAt(0).toUpperCase();
+    const idEsc=_esc(p.id);
+    return`<div style="background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:7px;padding:.6rem .8rem;margin-bottom:.4rem;display:flex;align-items:center;gap:.7rem">
+      <div style="width:34px;height:34px;border-radius:50%;background:rgba(165,180,252,.2);border:1px solid rgba(165,180,252,.35);display:flex;align-items:center;justify-content:center;font-weight:900;font-size:.9rem;color:#a5b4fc;flex-shrink:0">${_esc(inicial)}</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:700;font-size:.78rem;margin-bottom:.15rem">${_esc(p.nombre)||'—'}</div>
+        <div style="font-size:.62rem;color:var(--muted)">📱 ${_esc(p.celular)||'—'} · 🎯 ${_esc(p.disciplina)||'Sin disciplina'}</div>
+        <div style="font-size:.58rem;color:var(--muted);margin-top:.1rem">📧 ${_esc(p.correo||'profe.'+p.id+'@prisma.com')}</div>
+      </div>
+      <button onclick="abrirEdicionProfesor('${idEsc}')"
+        style="background:rgba(165,180,252,.12);color:#a5b4fc;border:1px solid rgba(165,180,252,.25);border-radius:6px;padding:.3rem .7rem;font-size:.62rem;font-weight:700;cursor:pointer;flex-shrink:0">✏️ Editar</button>
+    </div>`;
+  }).join('');
+}
+
+function filtrarProfesores(query){
+  const q=(query||'').toLowerCase();
+  const filtrado=q?_profesoresCached.filter(p=>(p.nombre||'').toLowerCase().includes(q)):_profesoresCached;
+  renderListaProfesores(filtrado);
+}
+
+function cargarDisciplinasEnSelect(selectId){
+  const sel=document.getElementById(selectId);
+  if(!sel)return;
+  const nombres=new Set();
+  fbDocsMap.forEach(d=>{if(d.nombre)nombres.add(d.nombre);});
+  const sorted=[...nombres].sort();
+  const current=sel.value;
+  sel.innerHTML='<option value="">— Sin disciplina asignada —</option>';
+  sorted.forEach(n=>{
+    const op=document.createElement('option');
+    op.value=n;op.textContent=n;
+    sel.appendChild(op);
+  });
+  if(current)sel.value=current;
+}
+
+function abrirEdicionProfesor(id){
+  _profesorEditandoId=id;
+  const prof=_profesoresCached.find(p=>p.id===id);
+  if(!prof){document.getElementById('profEditPanel').innerHTML='<p style="font-size:.7rem;color:var(--muted);text-align:center;padding:1.5rem 0">Profesor no encontrado</p>';return;}
+  const inputStyle='width:100%;background:rgba(255,255,255,.05);border:1px solid var(--border);border-radius:7px;padding:.45rem .6rem;color:var(--txt);font-size:.73rem;font-family:\'DM Sans\',sans-serif;outline:none;box-sizing:border-box;margin-bottom:.5rem';
+  const labelStyle='font-size:.56rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);display:block;margin-bottom:.2rem';
+  document.getElementById('profEditPanel').innerHTML=`
+    <div style="font-size:.7rem;font-weight:700;color:#a5b4fc;margin-bottom:.8rem;padding:.4rem .6rem;background:rgba(165,180,252,.08);border-radius:6px">${_esc(prof.nombre)}</div>
+    <label style="${labelStyle}">Nombre</label>
+    <input id="editProfNombre" type="text" value="${_esc(prof.nombre||'')}" style="${inputStyle}">
+    <label style="${labelStyle}">Celular</label>
+    <input id="editProfCelular" type="text" value="${_esc(prof.celular||'')}" style="${inputStyle}">
+    <label style="${labelStyle}">Disciplina asignada</label>
+    <select id="editProfDisciplina" style="${inputStyle};padding:.45rem .5rem">
+      <option value="">— Sin disciplina asignada —</option>
+    </select>
+    <button onclick="guardarEdicionProfesor()" class="btn" style="width:100%;background:rgba(165,180,252,.18);color:#a5b4fc;border:1px solid rgba(165,180,252,.35);margin-bottom:.8rem">💾 Guardar cambios</button>
+    <div style="border-top:1px solid var(--border);padding-top:.8rem;margin-bottom:.8rem">
+      <label style="${labelStyle}">Nueva contraseña (mín. 6 chars)</label>
+      <div style="position:relative;margin-bottom:.5rem">
+        <input id="editProfNewPwd" type="password" placeholder="••••••••" style="${inputStyle};margin-bottom:0;padding-right:2rem">
+        <button onclick="this.previousElementSibling.type=this.previousElementSibling.type==='password'?'text':'password'"
+          style="position:absolute;right:.4rem;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--muted);cursor:pointer;font-size:.75rem;padding:0">👁</button>
+      </div>
+      <button onclick="cambiarPasswordProfesor()" class="btn btn-ghost" style="width:100%;margin-bottom:.8rem">🔑 Actualizar contraseña</button>
+    </div>
+    <div style="border-top:1px solid var(--border);padding-top:.8rem">
+      <button onclick="eliminarProfesor()" class="btn-danger-sm" style="width:100%">🗑️ Eliminar profesor</button>
+    </div>
+  `;
+  // Populate disciplinas in edit select and set current value
+  cargarDisciplinasEnSelect('editProfDisciplina');
+  const editSel=document.getElementById('editProfDisciplina');
+  if(editSel&&prof.disciplina)editSel.value=prof.disciplina;
+}
+
+async function guardarEdicionProfesor(){
+  if(!_profesorEditandoId)return;
+  const nombre=(document.getElementById('editProfNombre').value||'').trim();
+  const celular=(document.getElementById('editProfCelular').value||'').trim();
+  const disciplina=document.getElementById('editProfDisciplina').value||'';
+  if(!nombre){toast('⚠️ El nombre es requerido');return;}
+  const prof=_profesoresCached.find(p=>p.id===_profesorEditandoId);
+  const oldDisciplina=prof?prof.disciplina||'':'';
+  try{
+    await db.collection('profesores').doc(_profesorEditandoId).update({nombre,celular,disciplina});
+    // Update catalogo: remove from old discipline, assign to new
+    if(oldDisciplina&&oldDisciplina!==disciplina){
+      const snapOld=await db.collection('catalogo')
+        .where('tipo','==','clase')
+        .where('profesorId','==',_profesorEditandoId).get();
+      if(!snapOld.empty){
+        const batch=db.batch();
+        snapOld.docs.forEach(d=>batch.update(d.ref,{profesor:'',profesorId:''}));
+        await batch.commit();
+      }
+    }
+    if(disciplina){
+      const snapNew=await db.collection('catalogo')
+        .where('tipo','==','clase')
+        .where('nombre','==',disciplina).get();
+      if(!snapNew.empty){
+        const batch=db.batch();
+        snapNew.docs.forEach(d=>batch.update(d.ref,{profesor:nombre,profesorId:_profesorEditandoId}));
+        await batch.commit();
+      }
+    }
+    toast('✅ Profesor actualizado correctamente');
+  }catch(e){
+    toast('❌ Error: '+e.message);
+  }
+}
+
+async function cambiarPasswordProfesor(){
+  if(!_profesorEditandoId)return;
+  const pwd=(document.getElementById('editProfNewPwd').value||'').trim();
+  if(pwd.length<6){toast('⚠️ La contraseña debe tener al menos 6 caracteres');return;}
+  try{
+    await db.collection('profesores').doc(_profesorEditandoId).update({passwordPendiente:pwd});
+    document.getElementById('editProfNewPwd').value='';
+    toast('✅ Contraseña actualizada. Se aplicará en el próximo inicio de sesión del profesor.');
+  }catch(e){
+    toast('❌ Error: '+e.message);
+  }
+}
+
+async function eliminarProfesor(){
+  if(!_profesorEditandoId)return;
+  const prof=_profesoresCached.find(p=>p.id===_profesorEditandoId);
+  if(!confirm('¿Eliminar al profesor '+(prof?.nombre||_profesorEditandoId)+'?\n\nEsta acción no se puede deshacer. Las clases asignadas a este profesor quedarán sin profesor asignado.'))return;
+  try{
+    const snapCat=await db.collection('catalogo')
+      .where('profesorId','==',_profesorEditandoId).get();
+    if(!snapCat.empty){
+      const batch=db.batch();
+      snapCat.docs.forEach(d=>batch.update(d.ref,{profesor:'',profesorId:''}));
+      await batch.commit();
+    }
+    await db.collection('profesores').doc(_profesorEditandoId).delete();
+    _profesorEditandoId=null;
+    const panel=document.getElementById('profEditPanel');
+    if(panel)panel.innerHTML='<p style="font-size:.7rem;color:var(--muted);text-align:center;padding:1.5rem 0">Selecciona un profesor para editarlo</p>';
+    toast('🗑️ Profesor eliminado. Nota: el acceso en Firebase Auth debe eliminarse manualmente en la consola de Firebase.');
+  }catch(e){
+    toast('❌ Error: '+e.message);
+  }
 }

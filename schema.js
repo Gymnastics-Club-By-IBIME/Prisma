@@ -50,7 +50,13 @@
  *   timestamp (serverTimestamp), registradoEn?
  *
  * profesores/{id}
- *   nombre, createdAt
+ *   nombre:             string    ← nombre completo del profesor
+ *   celular:            string    ← número de teléfono/celular  [NUEVO]
+ *   disciplina:         string    ← disciplina principal asignada [NUEVO]
+ *   authUID:            string    ← UID de Firebase Auth          [NUEVO]
+ *   correo:             string    ← profe.{id}@prisma.com         [NUEVO]
+ *   passwordPendiente?: string    ← contraseña a aplicar en próximo login [NUEVO, temporal]
+ *   createdAt:          timestamp
  *
  * config/contador_alumnos  -> ultimo_numero
  * config/contador_pagos    -> ultimo_numero

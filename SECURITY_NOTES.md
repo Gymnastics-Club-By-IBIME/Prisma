@@ -163,3 +163,33 @@ Ve a: Firebase Console → Realtime Database → Rules
 | Datos sensibles (password, pin, curp) en localStorage | Solo se guarda el `id` del alumno |
 | Reglas permisivas `if true` en Firestore | Reemplazadas por reglas basadas en `request.auth` |
 | Archivos HTML duplicados | Eliminados los 4 archivos con `(2)` / `(1)` |
+| Profesores creados manualmente en Auth Console | Ahora se crean desde el panel Admin → tab "👨‍🏫 Profesores" |
+
+---
+
+## 👨‍🏫 Gestión de Profesores desde el Panel Admin
+
+### ¿Cómo crear un nuevo profesor?
+
+Los profesores ahora se crean directamente desde el tab **"👨‍🏫 Profesores"** del panel de administración (`gymnastics_admin_clases.html`). **Ya NO es necesario crearlos manualmente en Firebase Auth Console.**
+
+1. Ingresa al panel Admin y ve al tab "👨‍🏫 Profesores"
+2. Completa el formulario: nombre, celular, disciplina (opcional) y contraseña inicial
+3. El sistema genera automáticamente el email interno: `profe.{nombre-apellido}@prisma.com`
+4. Al hacer clic en "➕ Crear Profesor" se pedirá confirmar la contraseña del admin
+5. El sistema crea el usuario en Firebase Auth y el documento en Firestore de forma automática
+
+### Campo `passwordPendiente`
+
+- Es un campo **temporal** en `profesores/{id}`
+- El admin puede actualizar la contraseña de un profesor desde el panel de edición
+- La nueva contraseña se guarda como `passwordPendiente` en Firestore
+- Al siguiente inicio de sesión del profesor, el sistema aplica la contraseña automáticamente y **elimina el campo** `passwordPendiente`
+- Si por algún motivo no se puede aplicar, el acceso del profesor **no se bloquea** (ya está autenticado)
+
+### Eliminar un profesor
+
+Al eliminar un profesor desde el panel:
+1. Las clases asignadas a ese profesor en el catálogo quedan sin profesor asignado
+2. El documento `profesores/{id}` se elimina de Firestore
+3. **⚠️ El usuario en Firebase Auth NO se elimina automáticamente** — debe hacerse manualmente en la [Firebase Console](https://console.firebase.google.com/) → Authentication → Users

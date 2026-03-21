@@ -132,6 +132,19 @@ async function _iniciarSesionProfesor(profesorId) {
     if (!snap.exists) { toast('Profesor no encontrado en la base de datos', 'error'); await firebase.auth().signOut(); return; }
     profesorActual = { id: snap.id, ...snap.data() };
 
+    // Aplicar contraseña pendiente si existe
+    if (profesorActual.passwordPendiente) {
+      try {
+        await firebase.auth().currentUser.updatePassword(profesorActual.passwordPendiente);
+        await db.collection('profesores').doc(profesorId).update({
+          passwordPendiente: firebase.firestore.FieldValue.delete()
+        });
+      } catch(e) {
+        console.warn('No se pudo aplicar contraseña pendiente:', e);
+        // No bloquear el acceso — el profesor ya está autenticado
+      }
+    }
+
     // Update sidebar
     const inicial = profesorActual.nombre.charAt(0).toUpperCase();
     document.getElementById('prof-avatar').textContent = inicial;
@@ -202,12 +215,24 @@ function loadClasesProfesor() {
 
   _unsubClases = db.collection('catalogo')
     .where('tipo', '==', 'clase')
-    .where('profesor', '==', profesorActual.nombre)
+    .where('profesorId', '==', profesorActual.id)
     .onSnapshot(snap => {
-      clasesProfesor = [];
-      snap.forEach(doc => clasesProfesor.push({ id: doc.id, ...doc.data() }));
-      _renderClasesProfesor(sbEl, dashEl);
-      loadDashboardStats();
+      if (!snap.empty) {
+        clasesProfesor = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        _renderClasesProfesor(sbEl, dashEl);
+        loadDashboardStats();
+      } else {
+        // Fallback: buscar por nombre para clases legacy sin profesorId
+        db.collection('catalogo')
+          .where('tipo', '==', 'clase')
+          .where('profesor', '==', profesorActual.nombre)
+          .get()
+          .then(snap2 => {
+            clasesProfesor = snap2.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            _renderClasesProfesor(sbEl, dashEl);
+            loadDashboardStats();
+          });
+      }
     }, err => {
       console.error('Error cargando clases:', err);
       toast('Error cargando clases: ' + err.message, 'error');
