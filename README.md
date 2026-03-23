@@ -4,21 +4,37 @@
 
 ```
 /
-├── gymnastics_admin_clases.html    Portal de administración (publicar clases, gestionar catálogo)
-├── gymnastics_alumno.html          Portal del alumno (reservar, pagar, ver estado en tiempo real)
-├── gymnastics_profesores.html      Portal del profesor (ver inscritos, pasar lista, asistencia)
-├── gymnastics_recepcion.html       Portal de recepción (cobros, inscripciones, reservas)
-└── assets/
-    └── js/
-        ├── firebase-init.js        Inicialización centralizada de Firebase (cargado por todos los HTML)
-        └── schema.js               Constantes de colecciones y campos de Firestore
+├── index.html                      Punto de entrada / página de bienvenida
+├── pages/
+│   ├── admin_clases.html           Portal de administración (publicar clases, gestionar catálogo)
+│   ├── alumno.html                 Portal del alumno (reservar, pagar, ver estado en tiempo real)
+│   ├── profesores.html             Portal del profesor (ver inscritos, pasar lista, asistencia)
+│   └── recepcion.html              Portal de recepción (cobros, inscripciones, reservas)
+├── css/
+│   ├── shared.css                  Estilos compartidos
+│   ├── admin.css
+│   ├── alumno.css
+│   ├── profesores.css
+│   └── recepcion.css
+├── js/
+│   ├── firebase-init.js            Inicialización centralizada de Firebase
+│   ├── schema.js                   Constantes de colecciones y campos de Firestore
+│   ├── sync.js
+│   ├── admin.js
+│   ├── alumno.js
+│   ├── profesores.js
+│   └── recepcion.js
+├── firebase/
+│   └── firestore.rules
+├── README.md
+└── SECURITY_NOTES.md
 ```
 
 ## Cómo configurar Firebase
 
 1. Abre [Firebase Console](https://console.firebase.google.com/) y crea o selecciona tu proyecto.
 2. En **Configuración del proyecto → Aplicaciones web**, copia la configuración.
-3. Abre `assets/js/firebase-init.js` y reemplaza los valores de `FIREBASE_CONFIG`:
+3. Abre `js/firebase-init.js` y reemplaza los valores de `FIREBASE_CONFIG`:
 
 ```javascript
 var FIREBASE_CONFIG = {
@@ -30,7 +46,7 @@ var FIREBASE_CONFIG = {
 };
 ```
 
-> No es necesario cambiar ningún otro archivo; todos los HTML cargan `assets/js/firebase-init.js` antes de su script de página.
+> No es necesario cambiar ningún otro archivo; todos los HTML cargan `js/firebase-init.js` antes de su script de página.
 
 ## Colecciones y campos de Firestore
 
