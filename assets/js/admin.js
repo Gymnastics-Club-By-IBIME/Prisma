@@ -958,6 +958,36 @@ function switchTab(id,btn){
   if(celdaActiva){
     renderEditPanel(celdaActiva.hora,celdaActiva.dia,celdaActiva.area,celdaActiva.franjaIdx);
   }
+
+  // ── Exponer al scope global para onclick handlers del HTML ──────────
+  window.toast             = toast;
+  window.switchTab         = switchTab;
+  window.renderGrid        = renderGrid;
+  window.renderPubGrid     = renderPubGrid;
+  window.abrirCelda        = abrirCelda;
+  window.cerrarCelda       = cerrarCelda;
+  window.agregarClase      = agregarClase;
+  window.agregarSugerida   = agregarSugerida;
+  window.quitarClase       = quitarClase;
+  window.cambiarCupo       = cambiarCupo;
+  window.publicarCelda     = publicarCelda;
+  window.publicarTodo      = publicarTodo;
+  window.publicarArea      = publicarArea;
+  window.importarTodas     = importarTodas;
+  window.limpiarFirebase   = limpiarFirebase;
+  window.guardarCostos     = guardarCostos;
+  window.cargarCostos      = cargarCostos;
+  window.mostrarMoverClase = mostrarMoverClase;
+  window.confirmarMover    = confirmarMover;
+  window.cambiarCupoClase  = cambiarCupoClase;
+  window.onProfBlur        = onProfBlur;
+  window.onCostoClaseBlur  = onCostoClaseBlur;
+  window.publicarUna       = publicarUna;
+  window.chipDragStart     = chipDragStart;
+  window.chipDragEnd       = chipDragEnd;
+  window.cellDragOver      = cellDragOver;
+  window.cellDragLeave     = cellDragLeave;
+  window.cellDrop          = cellDrop;
 });
 _unsubAlumnosCount=db.collection('alumnos').onSnapshot(s=>document.getElementById('hTotalAlumnos').innerText=s.size);
   cargarListaProfesores();
