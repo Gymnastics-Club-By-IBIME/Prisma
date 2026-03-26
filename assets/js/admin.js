@@ -62,10 +62,6 @@ firebase.auth().onAuthStateChanged(function(user){
     _iniciarSesionAdmin(user);
 });
 
-function initAdminListeners(){
-    if(_unsubCatalogo)return;
-    _unsubCatalogo=db.collection('catalogo').where('tipo','==','clase').onSnapshot(snap=>{
-
 // ── TOAST ─────────────────────────────────────────────────────────
 function toast(m,ms=3000){document.getElementById('toastMsg').innerText=m;const el=document.getElementById('toast');el.classList.add('show');setTimeout(()=>el.classList.remove('show'),ms);}
 
@@ -930,74 +926,87 @@ function switchTab(id,btn){
   if(id==='profesores')cargarDisciplinasEnSelect('profDisciplina');
 }
 
-// ── FIREBASE LISTENERS ────────────────────────────────────────────
-// These are now started inside initAdminListeners() after auth is confirmed.
-// The function header is added at the top of admin.js.
-  fbDocsMap=new Map();
-  snap.docs.forEach(d=>{
-    const x=d.data();
-    const k=fbKey(x.nombre,x.inicio+'-'+x.fin,x.dia||'');
-    fbDocsMap.set(k,{...x,id:d.id});
-    // Sync professor from Firebase to local
-    if(x.profesor)profesoresLocal[k]=x.profesor;
-  });
-  clasesEnFirebase=new Set(fbDocsMap.keys());
-  document.getElementById('hTotalClases').innerText=snap.size;
 
-  // First snapshot with data: rebuild local horarios from Firebase
-  if(!firebaseInited&&snap.size>0){
-    initHorariosFromFirebase();
-  }
-  firebaseInited=true;
+// ── Exponer al scope global para onclick handlers del HTML ──────────
+window.doLoginAdmin          = doLoginAdmin;
+window.doLogoutAdmin         = doLogoutAdmin;
+window.toast                 = toast;
+window.switchTab             = switchTab;
+window.renderGrid            = renderGrid;
+window.renderPubGrid         = renderPubGrid;
+window.recalcPlanas          = recalcPlanas;
+window.abrirCelda            = abrirCelda;
+window.cerrarCelda           = cerrarCelda;
+window.agregarClase          = agregarClase;
+window.agregarSugerida       = agregarSugerida;
+window.quitarClase           = quitarClase;
+window.cambiarCupo           = cambiarCupo;
+window.publicarCelda         = publicarCelda;
+window.publicarTodo          = publicarTodo;
+window.publicarArea          = publicarArea;
+window.importarTodas         = importarTodas;
+window.limpiarFirebase       = limpiarFirebase;
+window.guardarCostos         = guardarCostos;
+window.cargarCostos          = cargarCostos;
+window.mostrarMoverClase     = mostrarMoverClase;
+window.confirmarMover        = confirmarMover;
+window.cambiarCupoClase      = cambiarCupoClase;
+window.onProfBlur            = onProfBlur;
+window.onCostoClaseBlur      = onCostoClaseBlur;
+window.publicarUna           = publicarUna;
+window.chipDragStart         = chipDragStart;
+window.chipDragEnd           = chipDragEnd;
+window.cellDragOver          = cellDragOver;
+window.cellDragLeave         = cellDragLeave;
+window.cellDrop              = cellDrop;
+window.publicarSeleccionadas = publicarSeleccionadas;
+window.eliminarSeleccionadas = eliminarSeleccionadas;
+window.eliminarTodoFirebase  = eliminarTodoFirebase;
+window.actualizarEnFirebase  = actualizarEnFirebase;
+window.renderVistaAlumno     = renderVistaAlumno;
+window.filtrarProfesores     = filtrarProfesores;
+window.emailPreviewProfesor  = emailPreviewProfesor;
+window.crearProfesor         = crearProfesor;
+window.confirmarCreacionProfesor = confirmarCreacionProfesor;
+window.cancelarCreacionProfesor  = cancelarCreacionProfesor;
+window.abrirEdicionProfesor  = abrirEdicionProfesor;
+window.guardarEdicionProfesor    = guardarEdicionProfesor;
+window.cambiarPasswordProfesor   = cambiarPasswordProfesor;
+window.eliminarProfesor      = eliminarProfesor;
+window.cargarDisciplinasEnSelect = cargarDisciplinasEnSelect;
 
-  renderGrid(HORARIO_FITNESS,'gridFitness','fitness');
-  renderGrid(HORARIO_GIMNASIA,'gridGimnasia','gimnasia');
-  recalcPlanas();
-
-  // Re-render active edit panel if open
-  if(celdaActiva){
-    renderEditPanel(celdaActiva.hora,celdaActiva.dia,celdaActiva.area,celdaActiva.franjaIdx);
-  }
-
-  // ── Exponer al scope global para onclick handlers del HTML ──────────
-  window.toast             = toast;
-  window.switchTab         = switchTab;
-  window.renderGrid        = renderGrid;
-  window.renderPubGrid     = renderPubGrid;
-  window.abrirCelda        = abrirCelda;
-  window.cerrarCelda       = cerrarCelda;
-  window.agregarClase      = agregarClase;
-  window.agregarSugerida   = agregarSugerida;
-  window.quitarClase       = quitarClase;
-  window.cambiarCupo       = cambiarCupo;
-  window.publicarCelda     = publicarCelda;
-  window.publicarTodo      = publicarTodo;
-  window.publicarArea      = publicarArea;
-  window.importarTodas     = importarTodas;
-  window.limpiarFirebase   = limpiarFirebase;
-  window.guardarCostos     = guardarCostos;
-  window.cargarCostos      = cargarCostos;
-  window.mostrarMoverClase = mostrarMoverClase;
-  window.confirmarMover    = confirmarMover;
-  window.cambiarCupoClase  = cambiarCupoClase;
-  window.onProfBlur        = onProfBlur;
-  window.onCostoClaseBlur  = onCostoClaseBlur;
-  window.publicarUna       = publicarUna;
-  window.chipDragStart     = chipDragStart;
-  window.chipDragEnd       = chipDragEnd;
-  window.cellDragOver      = cellDragOver;
-  window.cellDragLeave     = cellDragLeave;
-  window.cellDrop          = cellDrop;
-});
-_unsubAlumnosCount=db.collection('alumnos').onSnapshot(s=>document.getElementById('hTotalAlumnos').innerText=s.size);
-  cargarListaProfesores();
+// ── INIT ADMIN LISTENERS ─────────────────────────────────────────────────
+function initAdminListeners(){
+    if(_unsubCatalogo)return;
+    _unsubCatalogo=db.collection('catalogo').where('tipo','==','clase').onSnapshot(snap=>{
+        // ── Procesar snapshot de catálogo ──────────────────────────────────
+        fbDocsMap=new Map();
+        snap.docs.forEach(d=>{
+            const x=d.data();
+            const k=fbKey(x.nombre,x.inicio+'-'+x.fin,x.dia||'');
+            fbDocsMap.set(k,{...x,id:d.id});
+            // Sync professor from Firebase to local
+            if(x.profesor)profesoresLocal[k]=x.profesor;
+        });
+        clasesEnFirebase=new Set(fbDocsMap.keys());
+        document.getElementById('hTotalClases').innerText=snap.size;
+        // First snapshot with data: rebuild local horarios from Firebase
+        if(!firebaseInited&&snap.size>0){
+            initHorariosFromFirebase();
+        }
+        firebaseInited=true;
+        renderGrid(HORARIO_FITNESS,'gridFitness','fitness');
+        renderGrid(HORARIO_GIMNASIA,'gridGimnasia','gimnasia');
+        recalcPlanas();
+        // Re-render active edit panel if open
+        if(celdaActiva){
+            renderEditPanel(celdaActiva.hora,celdaActiva.dia,celdaActiva.area,celdaActiva.franjaIdx);
+        }
+    });
+    _unsubAlumnosCount=db.collection('alumnos').onSnapshot(s=>document.getElementById('hTotalAlumnos').innerText=s.size);
+    cargarListaProfesores();
+    cargarCostos();
 } // end initAdminListeners
-
-// ── INIT ──────────────────────────────────────────────────────────
-renderGrid(HORARIO_FITNESS,'gridFitness','fitness');
-renderGrid(HORARIO_GIMNASIA,'gridGimnasia','gimnasia');
-recalcPlanas();
-cargarCostos();
 
 // ── PUBLICAR / ELIMINAR SELECCIONADAS ────────────────────────────
 async function publicarSeleccionadas(){
