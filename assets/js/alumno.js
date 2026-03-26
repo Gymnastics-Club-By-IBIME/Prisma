@@ -656,6 +656,28 @@ function puedeModificar(startAtDate){
     return ahoraMX()<cutoffAt(startAtDate);
 }
 
+/**
+ * Determina si una reserva legacy puede cancelarse según la regla de 12 horas.
+ * Si hay startAt lo usa directamente; si solo hay dia+hora, verifica si hoy es
+ * el día de la clase y si la hora de inicio es más de 12h en el futuro.
+ * En cualquier otro caso (sin información de tiempo), permite cancelar.
+ */
+function canCancelReservation(r){
+    if(r.startAt){
+        const sat=r.startAt.toDate?r.startAt.toDate():new Date(r.startAt);
+        return puedeModificar(sat);
+    }
+    if(r.dia&&r.hora){
+        const ahora=ahoraMX();
+        if(diaSemana(ahora).toLowerCase().trim()===String(r.dia||'').toLowerCase().trim()){
+            const[hh,mm]=(r.hora||'00:00').split(':').map(Number);
+            const ct=new Date(ahora);ct.setHours(hh,mm,0,0);
+            return puedeModificar(ct);
+        }
+    }
+    return true;
+}
+
 // ── Renderizar grid de plan (paso 2) ───────────────────────────
 function renderPlanGrid(){
     const esFit=AREA_SEL==='fitness';
@@ -1586,7 +1608,17 @@ function renderMisClases(){
             const badgeCls=rt?rt.cls:'';
             const extra=rt?.extra?'<p style="font-size:.6rem;color:#94a3b8;margin-top:.3rem;font-style:italic">'+rt.extra+'</p>':'';
             const preres=r.estado==='pre-reserva'||r.estado==='pendiente_pago';
-            const cancelBtn=preres?('<button onclick="cancelarReserva(\''+r.rid+'\',' + '\''+r.claseId+'\')" style="font-size:.6rem;font-weight:800;color:#ef4444;background:none;border:none;cursor:pointer;text-transform:uppercase;padding:0;margin-top:.4rem"><i class="fa-solid fa-trash-can" style="margin-right:3px"></i>Cancelar pre-reserva</button>'):'';
+            const confirmada=r.estado==='confirmada';
+            // Determine if modification/cancellation is still allowed (12h rule)
+            const puedeCanc=confirmada?canCancelReservation(r):true;
+            let cancelBtn='';
+            if(preres){
+                cancelBtn='<button onclick="cancelarReserva(\''+r.rid+'\',\''+r.claseId+'\')" style="font-size:.6rem;font-weight:800;color:#ef4444;background:none;border:none;cursor:pointer;text-transform:uppercase;padding:0;margin-top:.4rem"><i class="fa-solid fa-trash-can" style="margin-right:3px"></i>Cancelar pre-reserva</button>';
+            }else if(confirmada){
+                cancelBtn=puedeCanc
+                    ?'<button onclick="cancelarClaseConfirmada(\''+r.rid+'\',\''+r.claseId+'\')" style="font-size:.6rem;font-weight:800;color:#ef4444;background:none;border:none;cursor:pointer;text-transform:uppercase;padding:0;margin-top:.4rem"><i class="fa-solid fa-trash-can" style="margin-right:3px"></i>Cancelar clase</button>'
+                    :'<span style="font-size:.6rem;font-weight:700;color:#94a3b8;display:block;margin-top:.4rem">🔒 No se puede cancelar — faltan menos de 12 hrs</span>';
+            }
             const clasesInfo=(typeof r.pasesRestantes==='number'&&r.pasesTotal)?
                 '<p style="font-size:.6rem;font-weight:700;color:#64748b">🎫 '+r.pasesRestantes+'/'+r.pasesTotal+' pases restantes</p>':
                 (typeof r.clasesRestantes==='number'&&r.clasesPaquete)?
@@ -1654,6 +1686,14 @@ async function cancelarReserva(rid,cid){
         await db.collection('reservas').doc(rid).delete();
         toast('Reserva cancelada');
     }catch{toast('❌ Error al cancelar');}
+}
+
+async function cancelarClaseConfirmada(rid,cid){
+    if(!confirm('¿Cancelar esta clase? Se liberará el cupo y no se puede deshacer.'))return;
+    try{
+        await SyncModule.quitarAlumnoDeClase(rid,cid);
+        toast('✅ Clase cancelada correctamente');
+    }catch(e){toast('❌ Error al cancelar: '+(e.message||e));}
 }
 
 // ════════════════════════════════════════════════════════════════
