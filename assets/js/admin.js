@@ -678,11 +678,12 @@ async function publicarCelda(hora,dia,area,fi){
   for(const nombre of clases){
     const k=fbKey(nombre,hora,dia);
     const profesor=profesoresLocal[k]||fbDocsMap.get(k)?.profesor||'';
+    const profesorId=profesor?generarIdProfesor(profesor):'';
     const payload={
       nombre,tipo:'clase',area,inicio,fin,dia,
       diasSemana:[dia],cupo,cupoDisponible:cupo,
       precio:costos[1],precioPronto:pronto[1],
-      icon:getIcono(nombre),profesor,activa:true,
+      icon:getIcono(nombre),profesor,profesorId,activa:true,
       timestamp:firebase.firestore.FieldValue.serverTimestamp()
     };
     try{
@@ -714,11 +715,12 @@ async function publicarArea(area){
       for(const nombre of clases){
         const k=fbKey(nombre,franja.hora,dia);
         const profesor=profesoresLocal[k]||fbDocsMap.get(k)?.profesor||'';
+        const profesorId=profesor?generarIdProfesor(profesor):'';
         const payload={
           nombre,tipo:'clase',area,inicio,fin,dia,
           diasSemana:[dia],cupo,cupoDisponible:cupo,
           precio:costos[1],precioPronto:pronto[1],
-          icon:getIcono(nombre),profesor,activa:true,
+          icon:getIcono(nombre),profesor,profesorId,activa:true,
           timestamp:firebase.firestore.FieldValue.serverTimestamp()
         };
         try{
@@ -809,11 +811,12 @@ async function publicarUna(i){
   const pronto=c.area==='fitness'?COSTOS_FITNESS_PRONTO:COSTOS_GIMNASIA_PRONTO;
   const k=fbKey(c.nombre,c.hora,c.dia);
   const profesor=profesoresLocal[k]||fbDocsMap.get(k)?.profesor||'';
+  const profesorId=profesor?generarIdProfesor(profesor):'';
   const payload={
     nombre:c.nombre,tipo:'clase',area:c.area,inicio:c.inicio,fin:c.fin,
     dia:c.dia,diasSemana:[c.dia],cupo,cupoDisponible:cupo,
     precio:costos[1],precioPronto:pronto[1],
-    icon:c.icono,profesor,activa:true,
+    icon:c.icono,profesor,profesorId,activa:true,
     timestamp:firebase.firestore.FieldValue.serverTimestamp()
   };
   try{
@@ -836,11 +839,12 @@ async function publicarTodo(){
     const costos=c.area==='fitness'?COSTOS_FITNESS:COSTOS_GIMNASIA;
     const pronto=c.area==='fitness'?COSTOS_FITNESS_PRONTO:COSTOS_GIMNASIA_PRONTO;
     const profesor=profesoresLocal[k]||fbDocsMap.get(k)?.profesor||'';
+    const profesorId=profesor?generarIdProfesor(profesor):'';
     const payload={
       nombre:c.nombre,tipo:'clase',area:c.area,inicio:c.inicio,fin:c.fin,
       dia:c.dia,diasSemana:[c.dia],cupo,cupoDisponible:cupo,
       precio:costos[1],precioPronto:pronto[1],
-      icon:c.icono,profesor,activa:true,
+      icon:c.icono,profesor,profesorId,activa:true,
       timestamp:firebase.firestore.FieldValue.serverTimestamp()
     };
     try{
@@ -870,6 +874,7 @@ async function importarTodas(){
     const pronto=c.area==='fitness'?COSTOS_FITNESS_PRONTO:COSTOS_GIMNASIA_PRONTO;
     const k=fbKey(c.nombre,c.hora,c.dia);
     const profesor=profesoresLocal[k]||fbDocsMap.get(k)?.profesor||'';
+    const profesorId=profesor?generarIdProfesor(profesor):'';
     const row=document.createElement('div');
     row.className='prog-item';
     row.innerHTML=`<span>${getIcono(c.nombre)} ${c.nombre} · ${c.dia} ${c.inicio}-${c.fin}</span><span class="prog-pen">⏳</span>`;
@@ -878,7 +883,7 @@ async function importarTodas(){
       nombre:c.nombre,tipo:'clase',area:c.area,inicio:c.inicio,fin:c.fin,
       dia:c.dia,diasSemana:[c.dia],cupo,cupoDisponible:cupo,
       precio:costos[1],precioPronto:pronto[1],
-      icon:c.icono,profesor,activa:true,
+      icon:c.icono,profesor,profesorId,activa:true,
       timestamp:firebase.firestore.FieldValue.serverTimestamp()
     };
     try{
@@ -1021,11 +1026,12 @@ async function publicarSeleccionadas(){
     const costos=c.area==='fitness'?COSTOS_FITNESS:COSTOS_GIMNASIA;
     const pronto=c.area==='fitness'?COSTOS_FITNESS_PRONTO:COSTOS_GIMNASIA_PRONTO;
     const profesor=profesoresLocal[k]||fbDocsMap.get(k)?.profesor||'';
+    const profesorId=profesor?generarIdProfesor(profesor):'';
     const payload={
       nombre:c.nombre,tipo:'clase',area:c.area,inicio:c.inicio,fin:c.fin,
       dia:c.dia,diasSemana:[c.dia],cupo,cupoDisponible:cupo,
       precio:costos[1],precioPronto:pronto[1],
-      icon:c.icono,profesor,activa:true,
+      icon:c.icono,profesor,profesorId,activa:true,
       timestamp:firebase.firestore.FieldValue.serverTimestamp()
     };
     try{

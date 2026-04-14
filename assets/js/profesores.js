@@ -18,6 +18,7 @@ let asistenciaMap = {};   // alumnoId -> 'presente'|'ausente'|'tarde'|'justifica
 let qrScanner = null;
 // Unsubscribe handles for real-time listeners
 let _unsubClases = null;
+let _unsubClasesFallback = null;
 let _unsubAlumnos = null;
 // Handle for checkClaseActual interval (not used in this portal, kept for consistency)
 let _checkClaseInterval = null;
@@ -189,6 +190,7 @@ firebase.auth().onAuthStateChanged(async (user) => {
 function doLogout() {
   // Cancelar listeners en tiempo real
   if (_unsubClases) { _unsubClases(); _unsubClases = null; }
+  if (_unsubClasesFallback) { _unsubClasesFallback(); _unsubClasesFallback = null; }
   if (_unsubAlumnos) { _unsubAlumnos(); _unsubAlumnos = null; }
   profesorActual = null;
   clasesProfesor = [];
@@ -211,6 +213,7 @@ function loadClasesProfesor() {
   dashEl.innerHTML = '<div class="loading"><i class="fas fa-circle-notch spin"></i></div>';
 
   // Cancelar listener anterior si existe
+  if (_unsubClasesFallback) { _unsubClasesFallback(); _unsubClasesFallback = null; }
   if (_unsubClases) { _unsubClases(); _unsubClases = null; }
 
   _unsubClases = db.collection('catalogo')
@@ -218,16 +221,18 @@ function loadClasesProfesor() {
     .where('profesorId', '==', profesorActual.id)
     .onSnapshot(snap => {
       if (!snap.empty) {
+        // Cancel fallback listener if primary has data
+        if (_unsubClasesFallback) { _unsubClasesFallback(); _unsubClasesFallback = null; }
         clasesProfesor = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         _renderClasesProfesor(sbEl, dashEl);
         loadDashboardStats();
       } else {
-        // Fallback: buscar por nombre para clases legacy sin profesorId
-        db.collection('catalogo')
+        // Fallback: buscar por nombre para clases legacy sin profesorId (reactivo)
+        if (_unsubClasesFallback) { _unsubClasesFallback(); _unsubClasesFallback = null; }
+        _unsubClasesFallback = db.collection('catalogo')
           .where('tipo', '==', 'clase')
           .where('profesor', '==', profesorActual.nombre)
-          .get()
-          .then(snap2 => {
+          .onSnapshot(snap2 => {
             clasesProfesor = snap2.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             _renderClasesProfesor(sbEl, dashEl);
             loadDashboardStats();
@@ -514,6 +519,12 @@ async function saveAttendance() {
         asistencia: asistioFlag,
         falta: !asistioFlag
       });
+      // Decrementar clasesRestantes del alumno para que su panel refleje el consumo
+      if (asistioFlag) {
+        batch.update(db.collection('alumnos').doc(id), {
+          clasesRestantes: firebase.firestore.FieldValue.increment(-1)
+        });
+      }
       saved++;
     });
     await batch.commit();
